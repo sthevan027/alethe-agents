@@ -43,6 +43,11 @@ export const FEATURES: readonly FeatureDefinition[] = [
     titleKey: 'features.orchestrator.title',
     descriptionKey: 'features.orchestrator.description',
   },
+  {
+    id: 'prs',
+    titleKey: 'features.prs.title',
+    descriptionKey: 'features.prs.description',
+  },
 ]
 
 type StoredFeaturePreferences = {
@@ -66,6 +71,7 @@ export function normalizeEnabledFeatures(
       playwright: raw.enabledFeatures.playwright ?? false,
       // Opt-in: it lets the lead agent spawn worker agents that write to disk.
       orchestrator: raw.enabledFeatures.orchestrator ?? false,
+      prs: raw.enabledFeatures.prs ?? true,
     }
   }
   return {
@@ -77,5 +83,6 @@ export function normalizeEnabledFeatures(
     mcp: true,
     playwright: false,
     orchestrator: false,
+    prs: true,
   }
 }

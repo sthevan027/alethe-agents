@@ -80,6 +80,91 @@ fn gh_command(repo: &str, args: &[&str]) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
+/// Same as `gh_command`, but for subcommands that don't resolve a repo from cwd
+/// (e.g. `gh search prs`, which queries the GitHub search API directly against
+/// the authenticated account) — no `current_dir` needed.
+fn gh_command_global(args: &[&str]) -> Result<String, String> {
+    let output = Command::new("gh").args(args).output().map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            "gh_not_found: install the GitHub CLI and run gh auth login".to_string()
+        } else {
+            format!("gh_exec_failed:{error}")
+        }
+    })?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            "github_command_failed".to_string()
+        } else {
+            format!("github_command_failed:{stderr}")
+        });
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GhRepositoryRef {
+    name_with_owner: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GhSearchPullRequest {
+    number: u64,
+    title: String,
+    url: String,
+    repository: GhRepositoryRef,
+    author: GhAuthor,
+    is_draft: bool,
+    updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MyPullRequestSummary {
+    pub number: u64,
+    pub title: String,
+    pub url: String,
+    pub repo: String,
+    pub author: String,
+    pub is_draft: bool,
+    pub updated_at: String,
+}
+
+impl From<GhSearchPullRequest> for MyPullRequestSummary {
+    fn from(value: GhSearchPullRequest) -> Self {
+        Self {
+            number: value.number,
+            title: value.title,
+            url: value.url,
+            repo: value.repository.name_with_owner,
+            author: value.author.login,
+            is_draft: value.is_draft,
+            updated_at: value.updated_at,
+        }
+    }
+}
+
+/// PRs the authenticated `gh` user is involved in (author, assignee, mentioned,
+/// commented, or review-requested) across every repo they can see — not limited
+/// to repos registered as Alethe projects.
+#[tauri::command]
+pub fn github_pr_list_mine() -> Result<Vec<MyPullRequestSummary>, String> {
+    let raw = gh_command_global(&[
+        "search",
+        "prs",
+        "--involves=@me",
+        "--state",
+        "open",
+        "--json",
+        "number,title,url,repository,author,isDraft,updatedAt",
+    ])?;
+    let prs: Vec<GhSearchPullRequest> =
+        serde_json::from_str(&raw).map_err(|error| format!("github_pr_parse_failed:{error}"))?;
+    Ok(prs.into_iter().map(Into::into).collect())
+}
+
 fn pr_json_fields() -> &'static str {
     "number,title,body,url,baseRefName,headRefName,headRefOid,mergeStateStatus,isDraft,author,reviewDecision"
 }

@@ -52,7 +52,7 @@ type ModalKind =
   | null
 
 export type ActiveView = 'home' | 'workspace' | 'agentCanvas' | 'agentSandbox'
-export type RightSidebarMode = 'todo' | 'markdown' | 'git' | 'gsdSync' | 'mcp'
+export type RightSidebarMode = 'todo' | 'markdown' | 'git' | 'gsdSync' | 'mcp' | 'prs'
 export type MarkdownSidebarTab = { path: string; title: string }
 
 export type MemorySample = MemoryStats & {
@@ -156,6 +156,7 @@ type UiState = {
   showGitSidebar: () => void
   showGsdSyncSidebar: () => void
   showMcpSidebar: () => void
+  showPrsSidebar: () => void
   setAgentCanvasSession: (session: { folder: string; ptyId: string } | null) => void
   setAgentCanvasBudget: (usd: number | null) => void
   pushToast: (toast: {
@@ -298,13 +299,19 @@ export const useUiStore = create<UiState>((set) => ({
   showGitSidebar: () => set({ rightSidebarMode: 'git' }),
   showGsdSyncSidebar: () => set({ rightSidebarMode: 'gsdSync' }),
   showMcpSidebar: () => set({ rightSidebarMode: 'mcp' }),
+  showPrsSidebar: () => set({ rightSidebarMode: 'prs' }),
   setAgentCanvasSession: (session) => set({ agentCanvasSession: session }),
   setAgentCanvasBudget: (usd) => set({ agentCanvasBudgetUsd: usd }),
   pushToast: ({ title, body, agent, actions, silent }) =>
     set((s) => {
       const now = Date.now()
       const last = s.notifications[0]
-      if (last && last.title === title && last.body === body && now - last.createdAt < DUPLICATE_TOAST_WINDOW_MS) {
+      if (
+        last &&
+        last.title === title &&
+        last.body === body &&
+        now - last.createdAt < DUPLICATE_TOAST_WINDOW_MS
+      ) {
         return s
       }
       const entry: InAppToast = {

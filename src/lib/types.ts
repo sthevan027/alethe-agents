@@ -108,6 +108,7 @@ export type FeatureId =
   | 'mcp'
   | 'playwright'
   | 'orchestrator'
+  | 'prs'
 
 export type TodoItem = {
   id: string
@@ -116,6 +117,28 @@ export type TodoItem = {
   tags: string[]
 
   projectId?: string
+
+  /** Set when this todo was created from a GitHub PR via the Open PRs tab. */
+  prUrl?: string
+  prNumber?: number
+  /** "owner/name". */
+  prRepo?: string
+}
+
+export type PomodoroPhase = 'idle' | 'work' | 'shortBreak' | 'longBreak'
+export type PomodoroStatus = 'idle' | 'running' | 'paused' | 'finished'
+
+/** Durable snapshot mirrored from `pomodoroStore` into `preferences` so a running
+ *  session survives an app restart (see `src/stores/pomodoroStore.ts`). */
+export type PomodoroSessionSnapshot = {
+  phase: PomodoroPhase
+  status: PomodoroStatus
+  /** Epoch ms when the current phase ends. Null when idle or paused. */
+  endsAt: number | null
+  /** Frozen remaining time, set only while paused. */
+  remainingMsAtPause: number | null
+  cyclesCompleted: number
+  focusTodoId: string | null
 }
 
 export type SubTab = {
@@ -532,6 +555,13 @@ export type Preferences = {
   nodeHeapProfile?: 'conservative' | 'balanced' | 'performance'
 
   gsdSyncModelChain?: string[]
+
+  /** Pomodoro cycle durations, in minutes. */
+  pomodoroWorkMinutes: number
+  pomodoroShortBreakMinutes: number
+  pomodoroLongBreakMinutes: number
+  /** Mirrors `pomodoroStore`'s running session so it survives an app restart. */
+  pomodoroSession: PomodoroSessionSnapshot | null
 }
 
 export type ResourcePolicyMode = 'smart-lru' | 'manual'
@@ -634,6 +664,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
     mcp: true,
     playwright: false,
     orchestrator: false,
+    prs: true,
   },
   todoStoragePath: '',
   mcpDefaultScope: 'global',
@@ -660,6 +691,10 @@ export const DEFAULT_PREFERENCES: Preferences = {
     spawnGraceSeconds: 120,
   },
   nodeHeapProfile: 'balanced',
+  pomodoroWorkMinutes: 25,
+  pomodoroShortBreakMinutes: 5,
+  pomodoroLongBreakMinutes: 15,
+  pomodoroSession: null,
 }
 
 export const EMPTY_PROJECTS_FILE: ProjectsFile = {

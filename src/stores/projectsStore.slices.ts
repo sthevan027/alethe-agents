@@ -34,6 +34,7 @@ export type SliceCtx = {
 type TodosSlice = Pick<
   ProjectsState,
   | 'createTodo'
+  | 'createTodoFromPullRequest'
   | 'renameTodo'
   | 'updateTodoTags'
   | 'setTodoProject'
@@ -43,7 +44,7 @@ type TodosSlice = Pick<
   | 'reorderTodo'
 >
 
-export function createTodosSlice({ update }: SliceCtx): TodosSlice {
+export function createTodosSlice({ update, get }: SliceCtx): TodosSlice {
   return {
     createTodo: (rawTitle, rawTags = [], projectId) => {
       const title = normalizeTodoTitle(rawTitle)
@@ -54,6 +55,31 @@ export function createTodosSlice({ update }: SliceCtx): TodosSlice {
         completed: false,
         tags: normalizeTodoTags(rawTags),
         ...(projectId ? { projectId } : {}),
+      }
+      update((state) => {
+        const completedIndex = state.todos.findIndex((item) => item.completed)
+        const insertAt = completedIndex === -1 ? state.todos.length : completedIndex
+        return {
+          todos: [...state.todos.slice(0, insertAt), todo, ...state.todos.slice(insertAt)],
+        }
+      })
+      return todo
+    },
+
+    createTodoFromPullRequest: (pr, projectId) => {
+      const existing = get().todos.find(
+        (item) => item.prRepo === pr.repo && item.prNumber === pr.number,
+      )
+      if (existing) return existing
+      const todo: TodoItem = {
+        id: nanoid(),
+        title: normalizeTodoTitle(`PR #${pr.number}: ${pr.title}`),
+        completed: false,
+        tags: ['pr'],
+        ...(projectId ? { projectId } : {}),
+        prUrl: pr.url,
+        prNumber: pr.number,
+        prRepo: pr.repo,
       }
       update((state) => {
         const completedIndex = state.todos.findIndex((item) => item.completed)
@@ -169,13 +195,13 @@ export function createSubTabsSlice({ updateTerminal, updateSubTab }: SliceCtx): 
         const remaining = t.tabs.filter((s) => s.id !== tabId)
         if (remaining.length === 0) return t
         const adjacentTab =
-          closingIndex >= 0
-            ? (t.tabs[closingIndex + 1] ?? t.tabs[closingIndex - 1])
-            : undefined
+          closingIndex >= 0 ? (t.tabs[closingIndex + 1] ?? t.tabs[closingIndex - 1]) : undefined
         const activeTabId =
           t.activeTabId === tabId
             ? (adjacentTab?.id ?? remaining[0].id)
-            : (remaining.some((tab) => tab.id === t.activeTabId) ? t.activeTabId : remaining[0].id)
+            : remaining.some((tab) => tab.id === t.activeTabId)
+              ? t.activeTabId
+              : remaining[0].id
         const next = { ...t, tabs: remaining, activeTabId }
         return activeTabId ? touchTerminalUsage(next, activeTabId) : next
       }),

@@ -178,6 +178,10 @@ export type ProjectsState = ProjectsFile & {
   setWorkspaceGridLayout: (layout: GridLayout | null, recordHistory?: boolean) => void
 
   createTodo: (title: string, tags?: string[], projectId?: string) => TodoItem | null
+  createTodoFromPullRequest: (
+    pr: { number: number; title: string; url: string; repo: string },
+    projectId?: string,
+  ) => TodoItem
   renameTodo: (id: string, title: string) => void
   updateTodoTags: (id: string, tags: string[]) => void
   setTodoProject: (id: string, projectId: string | null) => void

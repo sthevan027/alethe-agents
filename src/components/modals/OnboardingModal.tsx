@@ -4,6 +4,7 @@ import {
   BrainCircuit,
   Check,
   GitBranch,
+  GitPullRequest,
   Globe,
   ListTodo,
   Network,
@@ -72,6 +73,7 @@ const FEATURE_ICONS = {
   mcp: Plug,
   playwright: Bot,
   orchestrator: Workflow,
+  prs: GitPullRequest,
 } as const
 
 export function OnboardingModal() {

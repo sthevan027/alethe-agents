@@ -13,6 +13,7 @@ describe('normalizeEnabledFeatures', () => {
       mcp: true,
       playwright: false,
       orchestrator: false,
+      prs: true,
     })
   })
 
@@ -26,6 +27,7 @@ describe('normalizeEnabledFeatures', () => {
       mcp: true,
       playwright: false,
       orchestrator: false,
+      prs: true,
     })
   })
 
@@ -39,6 +41,7 @@ describe('normalizeEnabledFeatures', () => {
       mcp: true,
       playwright: false,
       orchestrator: false,
+      prs: true,
     })
   })
 
@@ -54,6 +57,7 @@ describe('normalizeEnabledFeatures', () => {
       mcp: true,
       playwright: false,
       orchestrator: false,
+      prs: true,
     })
   })
 
@@ -76,5 +80,10 @@ describe('normalizeEnabledFeatures', () => {
 
   it('preserves an explicit Graphify preference', () => {
     expect(normalizeEnabledFeatures({ enabledFeatures: { graphify: false } }).graphify).toBe(false)
+  })
+
+  it('enables Open PRs by default and preserves an explicit choice', () => {
+    expect(normalizeEnabledFeatures(undefined).prs).toBe(true)
+    expect(normalizeEnabledFeatures({ enabledFeatures: { prs: false } }).prs).toBe(false)
   })
 })

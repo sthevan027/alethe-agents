@@ -30,8 +30,8 @@ mod ghostty_bridge;
 #[cfg(all(target_os = "macos", ghostty_linked))]
 mod ghostty_ffi;
 mod git_control;
-mod github_sync;
 mod github_pr;
+mod github_sync;
 mod graphify;
 mod handoff;
 mod health_probe;
@@ -349,6 +349,7 @@ pub fn run() {
             github_sync::github_sync_pull,
             github_pr::github_pr_find,
             github_pr::github_pr_merge,
+            github_pr::github_pr_list_mine,
             git_control::git_init,
             git_control::git_status,
             git_control::git_diff,

@@ -116,6 +116,14 @@ Notable user-facing changes to **Alethe** are documented here. The format is bas
   starting from scratch.
 - Project configs can be exported to a file and re-imported as a new project from the sidebar's
   project menu, for sharing a project's setup or moving it to a new machine.
+- A new "PRs" tab in the right sidebar lists every open GitHub Pull Request you're involved in as
+  author or reviewer, across every repo you can see — a global `gh search prs --involves=@me`
+  through the local GitHub CLI, not limited to repos registered as Alethe projects. Each PR can be
+  sent to the TODO list with one click, creating a linked task (duplicate-safe) that carries a
+  quick-open link back to the PR. A Pomodoro timer also lives in the TODO panel now: configurable
+  focus/short-break/long-break durations (default 25/5/15), an optional "focus on" a task, a
+  desktop notification at the end of each phase, and a live countdown pill centered in the title
+  bar while it runs. A session survives an app restart, resuming from the real elapsed time.
 
 ### Removed
 

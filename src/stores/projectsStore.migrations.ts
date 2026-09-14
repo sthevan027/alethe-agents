@@ -1,9 +1,3 @@
-   
-                                                                                
-                                                                                    
-                                                                      
-   
-
 import { nanoid } from 'nanoid'
 
 import { normalizeEnabledFeatures } from '../lib/features'
@@ -94,10 +88,9 @@ export function normalizePreferences(raw: LegacyPreferences | undefined): Prefer
     windowOpacity: Number.isFinite(rawWindowOpacity)
       ? Math.min(1, Math.max(0.6, rawWindowOpacity))
       : 1,
-                                                                               
-                                                                            
+
     enabledAgents: { ...DEFAULT_PREFERENCES.enabledAgents, ...preferences.enabledAgents },
-                                                                                 
+
     enabledFeatures: normalizeEnabledFeatures(raw),
     leftSidebarVisible: raw?.leftSidebarVisible ?? true,
     rightSidebarVisible: raw?.rightSidebarVisible ?? true,
@@ -153,6 +146,60 @@ export function normalizePreferences(raw: LegacyPreferences | undefined): Prefer
       ),
       spawnGraceSeconds: Math.min(900, Math.max(30, Math.round(resourcePolicy.spawnGraceSeconds))),
     },
+    pomodoroWorkMinutes: clampPomodoroMinutes(
+      preferences.pomodoroWorkMinutes,
+      DEFAULT_PREFERENCES.pomodoroWorkMinutes,
+    ),
+    pomodoroShortBreakMinutes: clampPomodoroMinutes(
+      preferences.pomodoroShortBreakMinutes,
+      DEFAULT_PREFERENCES.pomodoroShortBreakMinutes,
+    ),
+    pomodoroLongBreakMinutes: clampPomodoroMinutes(
+      preferences.pomodoroLongBreakMinutes,
+      DEFAULT_PREFERENCES.pomodoroLongBreakMinutes,
+    ),
+    pomodoroSession: normalizePomodoroSession(raw?.pomodoroSession),
+  }
+}
+
+function clampPomodoroMinutes(value: unknown, fallback: number): number {
+  const num = Number(value)
+  return Number.isFinite(num) ? Math.min(120, Math.max(1, Math.round(num))) : fallback
+}
+
+function normalizePomodoroSession(raw: unknown): Preferences['pomodoroSession'] {
+  if (!raw || typeof raw !== 'object') return null
+  const value = raw as Partial<import('../lib/types').PomodoroSessionSnapshot>
+  const phase =
+    value.phase === 'work' || value.phase === 'shortBreak' || value.phase === 'longBreak'
+      ? value.phase
+      : 'idle'
+  const status =
+    value.status === 'running' || value.status === 'paused' || value.status === 'finished'
+      ? value.status
+      : 'idle'
+  if (phase === 'idle' || status === 'idle') return null
+  const endsAt =
+    typeof value.endsAt === 'number' && Number.isFinite(value.endsAt) ? value.endsAt : null
+  // The phase's real end time already passed while the app was closed — surface it as
+  // finished (waiting for a manual "start next") instead of a stale "running" with negative
+  // remaining time. Normalized here, not just in pomodoroStore, so every reader of persisted
+  // preferences (not only the store's own hydration) sees a consistent, already-sane session.
+  const resolvedStatus = status === 'running' && endsAt !== null && endsAt <= Date.now() ? 'finished' : status
+  return {
+    phase,
+    status: resolvedStatus,
+    endsAt: resolvedStatus === 'finished' ? null : endsAt,
+    remainingMsAtPause:
+      typeof value.remainingMsAtPause === 'number' && Number.isFinite(value.remainingMsAtPause)
+        ? value.remainingMsAtPause
+        : null,
+    cyclesCompleted:
+      typeof value.cyclesCompleted === 'number' && Number.isFinite(value.cyclesCompleted)
+        ? Math.max(0, Math.round(value.cyclesCompleted))
+        : 0,
+    focusTodoId:
+      typeof value.focusTodoId === 'string' && value.focusTodoId ? value.focusTodoId : null,
   }
 }
 
@@ -173,6 +220,11 @@ export function normalizeTodos(raw: unknown): TodoItem[] {
       ...(typeof item?.projectId === 'string' && item.projectId
         ? { projectId: item.projectId }
         : {}),
+      ...(typeof item?.prUrl === 'string' && item.prUrl ? { prUrl: item.prUrl } : {}),
+      ...(typeof item?.prNumber === 'number' && Number.isFinite(item.prNumber)
+        ? { prNumber: item.prNumber }
+        : {}),
+      ...(typeof item?.prRepo === 'string' && item.prRepo ? { prRepo: item.prRepo } : {}),
     })
   }
   return [...result.filter((item) => !item.completed), ...result.filter((item) => item.completed)]
@@ -441,7 +493,6 @@ function migrateToV5(parsed: any): any {
   }
 }
 
-                                                                              
 export function collectGroupProjectIds(groupId: string, groups: Group[]): Set<string> {
   const result = new Set<string>()
   const queue = [groupId]

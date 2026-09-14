@@ -14,14 +14,33 @@ export function TodoSettingsModal() {
   const open = useUiStore((state) => state.openModal === 'todoSettings')
   const closeModal = useUiStore((state) => state.closeModal)
   const savedPath = useProjectsStore((state) => state.preferences.todoStoragePath)
+  const savedWorkMinutes = useProjectsStore((state) => state.preferences.pomodoroWorkMinutes)
+  const savedShortBreakMinutes = useProjectsStore(
+    (state) => state.preferences.pomodoroShortBreakMinutes,
+  )
+  const savedLongBreakMinutes = useProjectsStore(
+    (state) => state.preferences.pomodoroLongBreakMinutes,
+  )
   const setPreferences = useProjectsStore((state) => state.setPreferences)
   const resetTodosToDefault = useProjectsStore((state) => state.resetTodosToDefault)
   const [path, setPath] = useState('')
   const [saving, setSaving] = useState(false)
+  const [workMinutes, setWorkMinutes] = useState(savedWorkMinutes)
+  const [shortBreakMinutes, setShortBreakMinutes] = useState(savedShortBreakMinutes)
+  const [longBreakMinutes, setLongBreakMinutes] = useState(savedLongBreakMinutes)
 
   useEffect(() => {
     if (open) setPath(savedPath)
   }, [open, savedPath])
+
+  useEffect(() => {
+    if (!open) return
+    setWorkMinutes(savedWorkMinutes)
+    setShortBreakMinutes(savedShortBreakMinutes)
+    setLongBreakMinutes(savedLongBreakMinutes)
+  }, [open, savedWorkMinutes, savedShortBreakMinutes, savedLongBreakMinutes])
+
+  const clampMinutes = (value: number) => Math.min(120, Math.max(1, Math.round(value)))
 
   const browse = async () => {
     const selected = await pickDirectory({ defaultPath: path || savedPath || undefined })
@@ -35,7 +54,12 @@ export function TodoSettingsModal() {
       if (finalPath) {
         await ensureTodoTemplate(finalPath)
       }
-      setPreferences({ todoStoragePath: finalPath })
+      setPreferences({
+        todoStoragePath: finalPath,
+        pomodoroWorkMinutes: clampMinutes(workMinutes),
+        pomodoroShortBreakMinutes: clampMinutes(shortBreakMinutes),
+        pomodoroLongBreakMinutes: clampMinutes(longBreakMinutes),
+      })
       closeModal()
     } catch (error) {
       window.alert(t('todo.templateError', { message: String(error) }))
@@ -100,6 +124,39 @@ export function TodoSettingsModal() {
             <RotateCcw size={14} />
           </button>
         </div>
+      </div>
+      <div className={controls.field}>
+        <label className={controls.label}>{t('pomodoro.settingsWorkMinutes')}</label>
+        <input
+          type="number"
+          min={1}
+          max={120}
+          className={controls.input}
+          value={workMinutes}
+          onChange={(event) => setWorkMinutes(Number(event.target.value))}
+        />
+      </div>
+      <div className={controls.field}>
+        <label className={controls.label}>{t('pomodoro.settingsShortBreakMinutes')}</label>
+        <input
+          type="number"
+          min={1}
+          max={120}
+          className={controls.input}
+          value={shortBreakMinutes}
+          onChange={(event) => setShortBreakMinutes(Number(event.target.value))}
+        />
+      </div>
+      <div className={controls.field}>
+        <label className={controls.label}>{t('pomodoro.settingsLongBreakMinutes')}</label>
+        <input
+          type="number"
+          min={1}
+          max={120}
+          className={controls.input}
+          value={longBreakMinutes}
+          onChange={(event) => setLongBreakMinutes(Number(event.target.value))}
+        />
       </div>
       <div className={controls.field}>
         <label className={controls.label}>{t('todo.defaultLabel')}</label>
