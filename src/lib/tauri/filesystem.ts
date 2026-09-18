@@ -47,12 +47,21 @@ export async function readProjectMarker(projectDir: string): Promise<string | nu
   return invoke<string | null>('read_project_marker', { projectDir })
 }
 
-export async function renameFilesystemEntry(path: string, newName: string): Promise<string> {
-  return invoke<string>('rename_filesystem_entry', { path, newName })
+/**
+ * `ptyId` is required so the backend can independently verify the target is inside the owning
+ * terminal's real working directory before renaming/deleting — it never trusts a root the
+ * renderer might claim (security: tighten custom Tauri command boundaries).
+ */
+export async function renameFilesystemEntry(
+  path: string,
+  newName: string,
+  ptyId: string,
+): Promise<string> {
+  return invoke<string>('rename_filesystem_entry', { path, newName, ptyId })
 }
 
-export async function deleteFilesystemEntry(path: string): Promise<void> {
-  await invoke('delete_filesystem_entry', { path })
+export async function deleteFilesystemEntry(path: string, ptyId: string): Promise<void> {
+  await invoke('delete_filesystem_entry', { path, ptyId })
 }
 
 export async function ensureTodoTemplate(directory: string): Promise<string> {

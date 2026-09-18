@@ -173,8 +173,12 @@ export function FileExplorer({ projectId, cwd, ptyId, terminalName }: FileExplor
     setMenu(null)
     const nextName = window.prompt(t('files.renamePrompt', { name: entry.name }), entry.name)?.trim()
     if (!nextName || nextName === entry.name) return
+    if (!ptyId) {
+      pushToast({ title: t('files.actionFailed'), body: t('files.noActiveTerminal') })
+      return
+    }
     try {
-      await renameFilesystemEntry(entry.path, nextName)
+      await renameFilesystemEntry(entry.path, nextName, ptyId)
       setReloadKey((value) => value + 1)
       pushToast({ title: t('files.renameDone'), body: nextName })
     } catch (error) {
@@ -185,8 +189,12 @@ export function FileExplorer({ projectId, cwd, ptyId, terminalName }: FileExplor
   const deleteEntry = async (entry: DirectoryEntry) => {
     setMenu(null)
     if (!window.confirm(t(entry.is_dir ? 'files.deleteFolderConfirm' : 'files.deleteFileConfirm', { name: entry.name }))) return
+    if (!ptyId) {
+      pushToast({ title: t('files.actionFailed'), body: t('files.noActiveTerminal') })
+      return
+    }
     try {
-      await deleteFilesystemEntry(entry.path)
+      await deleteFilesystemEntry(entry.path, ptyId)
       setReloadKey((value) => value + 1)
       pushToast({ title: t('files.deleteDone'), body: entry.name })
     } catch (error) {

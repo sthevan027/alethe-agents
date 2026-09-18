@@ -1507,6 +1507,7 @@ export const ptBR: Record<MessageKey, string> = {
     'Apagar “{name}” e todo o conteúdo permanentemente? Esta ação não pode ser desfeita.',
   'files.deleteDone': 'Apagado',
   'files.actionFailed': 'A operação no arquivo falhou',
+  'files.noActiveTerminal': 'Nenhum terminal ativo para vincular essa ação.',
   'files.dragHint':
     '{path} — arraste para a área de trabalho, clique para visualizar ou dê dois cliques para adicionar ao grid',
   'files.dropToGrid': 'Solte para adicionar este arquivo ao grid',
