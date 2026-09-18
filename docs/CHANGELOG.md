@@ -10,6 +10,14 @@ Notable user-facing changes to **Alethe** are documented here. The format is bas
 
 ## [Unreleased]
 
+### Security
+
+- Renaming and deleting from the sidebar File Explorer is now confined to the owning terminal's
+  real working directory, verified by the backend from the terminal's own OS process rather than
+  trusted from the renderer. Previously `rename_filesystem_entry`/`delete_filesystem_entry` accepted
+  any existing path on disk with no ownership check — closes an unauthenticated arbitrary-path
+  rename/delete reachable from a compromised renderer (part of #145).
+
 ### Fixed
 
 - Installing a CLI from inside Alethe no longer ends in a dialog that spins forever. The install

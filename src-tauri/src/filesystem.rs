@@ -4,7 +4,10 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, State};
+
+use crate::path_guard;
+use crate::pty::{pty_cwd_sync, PtySessions};
 
 const TODO_TEMPLATE_FILE: &str = "alethe-todo.template.jsonc";
 const TODO_TEMPLATE: &str = r#"// Alethe Todo template
@@ -218,9 +221,23 @@ fn existing_entry(path: &str) -> Result<PathBuf, String> {
     Ok(target)
 }
 
-#[tauri::command]
-pub fn rename_filesystem_entry(path: String, new_name: String) -> Result<String, String> {
-    let target = existing_entry(&path)?;
+/// Resolves the authoritative root for a mutating filesystem command: the *real* OS-level cwd of
+/// the PTY that owns the request, read straight from its process (`pty::pty_cwd_sync`) rather than
+/// trusted from the renderer. `FileExplorer` mirrors whatever directory its paired terminal is
+/// currently in, so this is the same boundary the UI already implies — just enforced server-side.
+fn resolve_pty_root(sessions: &PtySessions, pty_id: &str) -> Result<PathBuf, String> {
+    pty_cwd_sync(sessions, pty_id)
+        .ok_or_else(|| "unable to resolve the terminal's working directory".to_string())
+}
+
+fn rename_filesystem_entry_inner(
+    root: &Path,
+    path: &str,
+    new_name: &str,
+) -> Result<String, String> {
+    let target = existing_entry(path)?;
+    let target = path_guard::ensure_within(root, &target)?;
+
     let trimmed_name = new_name.trim();
     let name_path = Path::new(trimmed_name);
     if trimmed_name.is_empty()
@@ -241,8 +258,19 @@ pub fn rename_filesystem_entry(path: String, new_name: String) -> Result<String,
 }
 
 #[tauri::command]
-pub fn delete_filesystem_entry(path: String) -> Result<(), String> {
-    let target = existing_entry(&path)?;
+pub fn rename_filesystem_entry(
+    sessions: State<'_, PtySessions>,
+    path: String,
+    new_name: String,
+    pty_id: String,
+) -> Result<String, String> {
+    let root = resolve_pty_root(&sessions, &pty_id)?;
+    rename_filesystem_entry_inner(&root, &path, &new_name)
+}
+
+fn delete_filesystem_entry_inner(root: &Path, path: &str) -> Result<(), String> {
+    let target = existing_entry(path)?;
+    let target = path_guard::ensure_within(root, &target)?;
     let metadata = fs::symlink_metadata(&target).map_err(|error| error.to_string())?;
     if metadata.file_type().is_symlink() || metadata.is_file() {
         fs::remove_file(&target).map_err(|error| error.to_string())
@@ -251,6 +279,16 @@ pub fn delete_filesystem_entry(path: String) -> Result<(), String> {
     } else {
         Err("unsupported filesystem entry".to_string())
     }
+}
+
+#[tauri::command]
+pub fn delete_filesystem_entry(
+    sessions: State<'_, PtySessions>,
+    path: String,
+    pty_id: String,
+) -> Result<(), String> {
+    let root = resolve_pty_root(&sessions, &pty_id)?;
+    delete_filesystem_entry_inner(&root, &path)
 }
 
 #[tauri::command]
@@ -379,4 +417,96 @@ pub fn unwatch_file(state: tauri::State<'_, FileWatchers>, path: String) -> Resu
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod boundary_tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_dir(label: &str) -> PathBuf {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("alethe-fs-cmd-{label}-{suffix}"));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn delete_inside_root_succeeds() {
+        let root = temp_dir("delete-ok");
+        let file = root.join("doomed.txt");
+        fs::write(&file, b"bye").unwrap();
+
+        delete_filesystem_entry_inner(&root, file.to_str().unwrap()).unwrap();
+        assert!(!file.exists());
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn delete_outside_root_is_rejected() {
+        let root = temp_dir("delete-reject-root");
+        let outside = temp_dir("delete-reject-outside");
+        let file = outside.join("safe.txt");
+        fs::write(&file, b"still here").unwrap();
+
+        let result = delete_filesystem_entry_inner(&root, file.to_str().unwrap());
+        assert!(result.is_err());
+        assert!(file.exists(), "file outside root must not be deleted");
+
+        fs::remove_dir_all(&root).ok();
+        fs::remove_dir_all(&outside).ok();
+    }
+
+    #[test]
+    fn rename_inside_root_succeeds() {
+        let root = temp_dir("rename-ok");
+        let file = root.join("old.txt");
+        fs::write(&file, b"content").unwrap();
+
+        let result = rename_filesystem_entry_inner(&root, file.to_str().unwrap(), "new.txt")
+            .expect("rename inside root should succeed");
+        assert!(PathBuf::from(&result).exists());
+        assert!(!file.exists());
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn rename_outside_root_is_rejected() {
+        let root = temp_dir("rename-reject-root");
+        let outside = temp_dir("rename-reject-outside");
+        let file = outside.join("old.txt");
+        fs::write(&file, b"content").unwrap();
+
+        let result = rename_filesystem_entry_inner(&root, file.to_str().unwrap(), "new.txt");
+        assert!(result.is_err());
+        assert!(file.exists(), "file outside root must not be renamed");
+
+        fs::remove_dir_all(&root).ok();
+        fs::remove_dir_all(&outside).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn delete_via_symlink_escape_is_rejected() {
+        use std::os::unix::fs::symlink;
+
+        let root = temp_dir("delete-symlink-root");
+        let outside = temp_dir("delete-symlink-outside");
+        let target = outside.join("keepme.txt");
+        fs::write(&target, b"keep").unwrap();
+        let link = root.join("escape");
+        symlink(&target, &link).unwrap();
+
+        let result = delete_filesystem_entry_inner(&root, link.to_str().unwrap());
+        assert!(result.is_err());
+        assert!(target.exists(), "symlink escape must not delete the real target");
+
+        fs::remove_dir_all(&root).ok();
+        fs::remove_dir_all(&outside).ok();
+    }
 }
