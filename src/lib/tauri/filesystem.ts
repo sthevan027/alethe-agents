@@ -47,11 +47,7 @@ export async function readProjectMarker(projectDir: string): Promise<string | nu
   return invoke<string | null>('read_project_marker', { projectDir })
 }
 
-/**
- * `ptyId` is required so the backend can independently verify the target is inside the owning
- * terminal's real working directory before renaming/deleting — it never trusts a root the
- * renderer might claim (security: tighten custom Tauri command boundaries).
- */
+// `ptyId` lets the backend verify the target against that terminal's real cwd instead of trusting the renderer.
 export async function renameFilesystemEntry(
   path: string,
   newName: string,
