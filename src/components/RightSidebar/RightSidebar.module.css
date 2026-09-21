@@ -91,12 +91,14 @@
 
 .tabContent > :global(aside),
 .tabContent > .markdownPanel,
+.tabContent > .contributedPanel,
 .tabContent > .gitPanel {
   min-height: 0;
   flex: 1;
 }
 
 .markdownPanel,
+.contributedPanel,
 .gitPanel {
   min-width: 0;
   height: 100%;

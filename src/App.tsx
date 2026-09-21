@@ -1,3 +1,5 @@
+import { ProjectGridModal } from './components/modals/ProjectGridModal'
+import { ResetCreditModal } from './components/modals/ResetCreditModal'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { Bell, X } from 'lucide-react'
@@ -7,6 +9,7 @@ import { Group as PanelGroup, Panel, Separator, usePanelRef } from 'react-resiza
 import styles from './App.module.css'
 import homeBackground from './assets/home-bg-right.png'
 import { AgentSandbox } from './components/AgentSandbox'
+import { ContributedModals } from './components/ContributedModals'
 import { DictationButton } from './components/DictationButton'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { FocusOverlay } from './components/FocusOverlay'
@@ -18,10 +21,10 @@ import { AddBrowserModal } from './components/modals/AddBrowserModal'
 import { AddContentModal } from './components/modals/AddContentModal'
 import { AiUsageModal } from './components/modals/AiUsageModal'
 import { AuditModal } from './components/modals/AuditModal'
-import { FsBrowserModal } from './components/modals/FsBrowserModal'
 import { EditGroupModal } from './components/modals/EditGroupModal'
 import { EditProjectModal } from './components/modals/EditProjectModal'
 import { FindJumpModal } from './components/modals/FindJumpModal'
+import { FsBrowserModal } from './components/modals/FsBrowserModal'
 import { HandoffModal } from './components/modals/HandoffModal'
 import { McpIntroModal } from './components/modals/McpIntroModal'
 import { McpManagerModal } from './components/modals/McpManagerModal'
@@ -37,7 +40,6 @@ import { RemoteControlModal } from './components/modals/RemoteControlModal'
 import { SuspendGroupModal } from './components/modals/SuspendGroupModal'
 import { SyncModal } from './components/modals/SyncModal'
 import { ThemePickerModal } from './components/modals/ThemePickerModal'
-import { TodoSettingsModal } from './components/modals/TodoSettingsModal'
 import { TopbarSettingsModal } from './components/modals/TopbarSettingsModal'
 import { UpdateModal } from './components/modals/UpdateModal'
 import { WelcomeModal } from './components/modals/WelcomeModal'
@@ -49,6 +51,7 @@ import { TokenHud } from './components/TokenHud'
 import { AsciiEffect } from './components/ui/ascii-effect'
 import { WorkspaceView } from './components/WorkspaceView'
 import { useAgentBrowserOffers } from './hooks/useAgentBrowserOffers'
+import { useAgentHookBridge } from './hooks/useAgentHookBridge'
 import { useCliOpenRequests } from './hooks/useCliOpenRequests'
 import { useCloseConfirmation } from './hooks/useCloseConfirmation'
 import { useDiscordPresence } from './hooks/useDiscordPresence'
@@ -56,7 +59,9 @@ import { useKeybindings } from './hooks/useKeybindings'
 import { useMcpIntroPrompt } from './hooks/useMcpIntroPrompt'
 import { useRemoteControlService } from './hooks/useRemoteControlService'
 import { useResourceSupervisor } from './hooks/useResourceSupervisor'
+import { useRouter9AutoStart } from './hooks/useRouter9AutoStart'
 import { startActivityTracker } from './lib/activityTracker'
+import { agentAccentVar } from './lib/agentProviders'
 import { APP_SHELL_ID } from './lib/appShell'
 import { AGENT_SANDBOX_ENABLED } from './lib/featureFlags'
 import { intlLocale, translate, useT } from './lib/i18n'
@@ -64,6 +69,9 @@ import { visibilityFromPanelResize, widthFromPanelResize } from './lib/sidebarPa
 import { setMaxConcurrentSpawns } from './lib/spawnQueue'
 import { ghosttyKillAll, setWindowOpacity } from './lib/tauri'
 import { getLastCrashReport } from './lib/tauri'
+import { applyLegacyPluginMigrations } from './lib/plugins'
+import { useSidebarViews } from './lib/viewPlacement'
+import { useAppliedTheme } from './lib/themes'
 import { loadThemeIconBytes } from './lib/themeIcons'
 import { checkForUpdate } from './lib/updater'
 import { useProjectsStore } from './stores/projectsStore'
@@ -149,7 +157,7 @@ function ToastItem({ toast }: { toast: InAppToast }) {
   }, [dismissToast, toast.id, toast.actions])
 
   const accentStyle = {
-    '--toast-accent': toast.agent ? `var(--agent-${toast.agent})` : 'var(--accent)',
+    '--toast-accent': toast.agent ? agentAccentVar(toast.agent) : 'var(--accent)',
   } as CSSProperties
 
   return (
@@ -218,6 +226,7 @@ export default function App() {
   const hydrate = useProjectsStore((s) => s.hydrate)
   const hydrated = useProjectsStore((s) => s.hydrated)
   const uiTheme = useProjectsStore((s) => s.preferences.uiTheme)
+  const appliedTheme = useAppliedTheme(uiTheme)
   const visualStyle = useProjectsStore((s) => s.preferences.visualStyle ?? 'normal')
   const motionPreference = useProjectsStore((s) => s.preferences.motionPreference)
   const appIconTheme = useProjectsStore((s) => s.preferences.appIconTheme)
@@ -233,13 +242,11 @@ export default function App() {
   const rightSidebarVisible = useProjectsStore((s) => s.preferences.rightSidebarVisible)
   const leftSidebarWidth = useProjectsStore((s) => s.preferences.leftSidebarWidth)
   const rightSidebarWidth = useProjectsStore((s) => s.preferences.rightSidebarWidth)
-  const todosEnabled = useProjectsStore((s) => s.preferences.enabledFeatures.todos)
+
   const playwrightEnabled = useProjectsStore((s) => s.preferences.enabledFeatures.playwright)
-  const gitEnabled = useProjectsStore((s) => s.preferences.enabledFeatures.git)
   const mcpEnabled = useProjectsStore((s) => s.preferences.enabledFeatures.mcp)
-  const gitControlPlacement = useProjectsStore((s) => s.preferences.gitControlPlacement)
-  const rightPanelEnabled =
-    todosEnabled || mcpEnabled || (gitEnabled && gitControlPlacement === 'right')
+  const rightSidebarTabs = useSidebarViews('right')
+  const rightPanelEnabled = mcpEnabled || rightSidebarTabs.length > 0
   const setPreferences = useProjectsStore((s) => s.setPreferences)
   // Keep panel defaults stable while dragging. Updating defaultSize on every
   // resize event can make react-resizable-panels rebuild the layout mid-drag.
@@ -273,6 +280,7 @@ export default function App() {
   useCloseConfirmation()
   useResourceSupervisor(hydrated)
   useAgentBrowserOffers(playwrightEnabled)
+  useAgentHookBridge()
   useCliOpenRequests(hydrated)
 
   useEffect(() => {
@@ -283,6 +291,8 @@ export default function App() {
     if (hydrated) restoreMarkdownSidebarHistory()
   }, [activeProfileId, hydrated, restoreMarkdownSidebarHistory])
 
+  useRouter9AutoStart(hydrated)
+
   useEffect(() => {
     void ghosttyKillAll().catch(() => {
       /* No-op on unsupported platforms. */
@@ -290,8 +300,13 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    document.documentElement.dataset.theme = uiTheme
-  }, [uiTheme])
+    document.documentElement.dataset.theme = appliedTheme
+  }, [appliedTheme])
+
+  useEffect(() => {
+    if (!hydrated) return
+    void applyLegacyPluginMigrations()
+  }, [hydrated])
 
   useEffect(() => {
     document.documentElement.dataset.visualStyle = visualStyle
@@ -716,13 +731,14 @@ export default function App() {
           </Suspense>
         ) : null}
         <SuspendGroupModal />
+        <ProjectGridModal />
+        <ResetCreditModal />
         {openModal === 'memoryAnalytics' ? (
           <Suspense fallback={null}>
             <MemoryAnalyticsModal />
           </Suspense>
         ) : null}
         <ThemePickerModal />
-        <TodoSettingsModal />
         <TopbarSettingsModal />
         <AiUsageModal />
         <UpdateModal />
@@ -730,6 +746,7 @@ export default function App() {
         <RecentChatsModal />
         <HandoffModal />
         <McpManagerModal />
+        <ContributedModals />
         <McpIntroModal />
         <RemoteControlModal />
         <AuditModal />

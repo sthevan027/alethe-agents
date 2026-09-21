@@ -1,10 +1,18 @@
+import { normalizeProjectGrids, projectGridContainer } from '../lib/projectGrids'
 import { nanoid } from 'nanoid'
 
-import { normalizeEnabledFeatures } from '../lib/features'
+import {
+  legacyGitFeatureFlag,
+  legacyTodosFeatureFlag,
+  normalizeEnabledFeatures,
+} from '../lib/features'
+import { recordLegacyGitFlag, recordLegacyTodosFlag } from '../lib/plugins/legacyMigration'
+import { normalizePort } from '../lib/router9'
 import { normalizeAppIconTheme } from '../lib/themeIcons'
 import { normalizeTodoTags, normalizeTodoTitle } from '../lib/todos'
 import {
   DEFAULT_PREFERENCES,
+  DEFAULT_ROUTER9_PREFERENCES,
   EMPTY_PROJECTS_FILE,
   type Group,
   GROUP_COLORS,
@@ -59,7 +67,28 @@ function normalizeStoredAccents(file: ProjectsFile): ProjectsFile {
   }
 }
 
+/**
+ * Placement used to be a single Git-only setting. It is a per-view override
+ * now, so the old value is folded in once and then ignored.
+ */
+function normalizeViewPlacements(
+  preferences: Preferences & { gitControlPlacement?: 'left' | 'right' },
+): Record<string, 'left' | 'right'> {
+  const stored = preferences.viewPlacements
+  const placements: Record<string, 'left' | 'right'> = {}
+  for (const [id, side] of Object.entries(stored ?? {})) {
+    if (side === 'left' || side === 'right') placements[id] = side
+  }
+  if (placements.git === undefined && preferences.gitControlPlacement === 'right') {
+    placements.git = 'right'
+  }
+  return placements
+}
+
 export function normalizePreferences(raw: LegacyPreferences | undefined): Preferences {
+  // Git Control became a plugin; its old toggle is handed to the plugin host.
+  recordLegacyGitFlag(legacyGitFeatureFlag(raw))
+  recordLegacyTodosFlag(legacyTodosFeatureFlag(raw))
   const preferences = {
     ...DEFAULT_PREFERENCES,
     ...(raw ?? {}),
@@ -82,6 +111,8 @@ export function normalizePreferences(raw: LegacyPreferences | undefined): Prefer
   const legacyAccountCreated =
     raw?.accountCreated ??
     Boolean(raw?.onboardingDone && raw?.displayName && raw.displayName.trim().length > 0)
+  const rawRouter9 = raw?.router9
+  const router9 = { ...DEFAULT_ROUTER9_PREFERENCES, ...(rawRouter9 ?? {}) }
   const rawWindowOpacity = Number(raw?.windowOpacity ?? 1)
   return {
     ...preferences,
@@ -101,9 +132,15 @@ export function normalizePreferences(raw: LegacyPreferences | undefined): Prefer
     motionPreference: raw?.motionPreference === 'reduced' ? 'reduced' : 'animated',
     accountCreated: legacyAccountCreated,
     topbarStyle: preferences.topbarStyle === 'three-areas' ? 'three-areas' : 'classic',
-    gitControlPlacement: preferences.gitControlPlacement === 'right' ? 'right' : 'left',
+    viewPlacements: normalizeViewPlacements(preferences),
     mcpDefaultScope: preferences.mcpDefaultScope === 'project' ? 'project' : 'global',
     mcpOnboardingSeen: Boolean(preferences.mcpOnboardingSeen),
+    setupWalkthrough: {
+      ...DEFAULT_PREFERENCES.setupWalkthrough,
+      ...(raw?.setupWalkthrough ?? {}),
+    },
+    setupWalkthroughHidden:
+      raw?.setupWalkthroughHidden ?? Boolean(raw?.onboardingDone && !raw?.setupWalkthrough),
     displayName: preferences.displayName.trim(),
     profileImageUrl: preferences.profileImageUrl.trim(),
     todoStoragePath: preferences.todoStoragePath.trim(),
@@ -146,6 +183,15 @@ export function normalizePreferences(raw: LegacyPreferences | undefined): Prefer
       ),
       spawnGraceSeconds: Math.min(900, Math.max(30, Math.round(resourcePolicy.spawnGraceSeconds))),
     },
+    router9: {
+      ...router9,
+      enabled: Boolean(router9.enabled),
+      autoStart: Boolean(router9.autoStart),
+      defaultForNewAgents: Boolean(router9.defaultForNewAgents),
+      source: router9.source === 'external' ? 'external' : 'managed',
+      port: normalizePort(Number(router9.port)),
+      apiKey: String(router9.apiKey ?? '').trim(),
+    },
     pomodoroWorkMinutes: clampPomodoroMinutes(
       preferences.pomodoroWorkMinutes,
       DEFAULT_PREFERENCES.pomodoroWorkMinutes,
@@ -185,7 +231,8 @@ function normalizePomodoroSession(raw: unknown): Preferences['pomodoroSession'] 
   // finished (waiting for a manual "start next") instead of a stale "running" with negative
   // remaining time. Normalized here, not just in pomodoroStore, so every reader of persisted
   // preferences (not only the store's own hydration) sees a consistent, already-sane session.
-  const resolvedStatus = status === 'running' && endsAt !== null && endsAt <= Date.now() ? 'finished' : status
+  const resolvedStatus =
+    status === 'running' && endsAt !== null && endsAt <= Date.now() ? 'finished' : status
   return {
     phase,
     status: resolvedStatus,
@@ -360,7 +407,7 @@ export function migrateWorkspaceNavigation(base: {
   }
 }
 
-function migrateToV7(parsed: any): ProjectsFile {
+function migrateToV7(parsed: any): any {
   return normalizeStoredAccents({
     ...parsed,
     version: 7,
@@ -379,10 +426,91 @@ function migrateToV7(parsed: any): ProjectsFile {
   })
 }
 
+/**
+ * Migrates v7 -> v8: terminal remote-sharing flips from opt-out
+ * (`remoteExcluded`) to opt-in (`remoteShared`). A terminal that was already
+ * exposed (not explicitly `remoteExcluded: true`) keeps working after the
+ * upgrade; only terminals created from here on default to unshared.
+ */
+function migrateToV8(parsed: any): any {
+  const v7 = migrateToV7(parsed)
+  return {
+    ...v7,
+    version: 8,
+    projects: v7.projects.map((project: Project) => ({
+      ...project,
+      terminals: (project.terminals ?? []).map((terminal) => ({
+        ...terminal,
+        remoteShared: terminal.remoteShared ?? terminal.remoteExcluded !== true,
+      })),
+    })),
+  }
+}
+
 /** Migrates older files and normalizes restorable snapshots. */
 export function migrate(parsed: any): ProjectsFile {
-  if (parsed.version === 7) return migrateToV7(parsed)
-  if (parsed.version === 6) return migrateToV7(parsed)
+  const base = migrateLegacy(parsed.version === 9 ? { ...parsed, version: 8 } : parsed)
+  const projects = base.projects.map((project: Project) => normalizeProjectGrids(project))
+  const migrateSnapshot = (snapshot: WorkspaceTab['snapshot'], scoped: boolean) =>
+    sanitizeWorkspaceSnapshot(
+      {
+        ...snapshot,
+        containers: snapshot.containers.map((container) => {
+          const project = projects.find((item: Project) => item.id === container.projectId)
+          if (!project || project.mode === 'agentSandbox' || !scoped || container.gridId)
+            return container
+          return { ...container, gridId: projectGridContainer(project).gridId }
+        }),
+      },
+      projects,
+    )
+  const activeTab = base.workspace.tabs.find(
+    (tab: WorkspaceTab) => tab.id === base.workspace.activeTabId,
+  )
+  const scoped = (tab?: WorkspaceTab) => tab?.kind === 'project' || tab?.kind === 'group'
+  return {
+    ...base,
+    version: 9,
+    projects,
+    workspace: {
+      ...base.workspace,
+      containers: migrateSnapshot(
+        {
+          ...captureWorkspaceSnapshot({
+            containers: base.workspace.containers,
+            activeProjectId: base.activeProjectId,
+            activeGroupId: base.workspace.activeGroupId,
+            focusedTerminalId: base.workspace.focusedTerminalId,
+            preferences: base.preferences,
+          }),
+        },
+        scoped(activeTab),
+      ).containers,
+      tabs: base.workspace.tabs.map((tab: WorkspaceTab) => ({
+        ...tab,
+        snapshot: migrateSnapshot(tab.snapshot, scoped(tab)),
+      })),
+      closedTabs: (base.workspace.closedTabs ?? []).map((tab: WorkspaceTab) => ({
+        ...tab,
+        snapshot: migrateSnapshot(tab.snapshot, scoped(tab)),
+      })),
+      history: base.workspace.history.map(
+        (entry: ProjectsFile['workspace']['history'][number]) => ({
+          ...entry,
+          snapshot: migrateSnapshot(
+            entry.snapshot,
+            scoped(base.workspace.tabs.find((tab: WorkspaceTab) => tab.id === entry.tabId)),
+          ),
+        }),
+      ),
+    },
+  }
+}
+
+function migrateLegacy(parsed: any): ProjectsFile {
+  if (parsed.version === 8) return migrateToV8(parsed)
+  if (parsed.version === 7) return migrateToV8(parsed)
+  if (parsed.version === 6) return migrateToV8(parsed)
 
   const v5Result = parsed.version === 5 ? parsed : migrateToV5(parsed)
 
@@ -392,7 +520,7 @@ export function migrate(parsed: any): ProjectsFile {
     orphanWorktrees: p.orphanWorktrees ?? [],
   }))
 
-  return migrateToV7({
+  return migrateToV8({
     ...v5Result,
     version: 6,
     projects: v6Projects,

@@ -1,14 +1,23 @@
 import { Cloud, Download, Github, Heart, Loader2, LogOut, Upload } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
+import { applyCloudPayload, buildCloudPayload } from '../../lib/cloudSync'
 import { intlLocale, type MessageKey, useT } from '../../lib/i18n'
 import {
+  cloudSyncDeviceFinish,
+  cloudSyncDeviceStart,
+  cloudSyncLogout,
+  cloudSyncPull,
+  cloudSyncPush,
+  cloudSyncStatus,
   githubSyncLogout,
   githubSyncPull,
   githubSyncPush,
   githubSyncSetToken,
   githubSyncStatus,
   openInBrowser,
+  type CloudDeviceStart,
+  type CloudSyncStatus,
   type GithubSyncStatus,
 } from '../../lib/tauri'
 import { useProjectsStore } from '../../stores/projectsStore'
@@ -21,6 +30,7 @@ const CREATE_TOKEN_URL =
   'https://github.com/settings/tokens/new?scopes=gist&description=Alethe%20Sync'
 
 type Busy = null | 'connect' | 'push' | 'pull' | 'logout'
+type CloudBusy = null | 'signin' | 'push' | 'pull' | 'logout'
 
                                                                             
                                                          
@@ -31,6 +41,11 @@ const KNOWN_ERRORS = new Set([
   'no_remote',
   'nothing_to_sync',
   'remote_missing_projects',
+  'not_configured',
+  'session_expired',
+  'access_denied',
+  'code_expired',
+  'malformed_payload',
 ])
 
 export function SyncModal() {
@@ -39,6 +54,7 @@ export function SyncModal() {
   const closeModal = useUiStore((s) => s.closeModal)
   const language = useProjectsStore((s) => s.preferences.language)
   const hydrate = useProjectsStore((s) => s.hydrate)
+  const setPreferences = useProjectsStore((s) => s.setPreferences)
 
   const [status, setStatus] = useState<GithubSyncStatus | null>(null)
   const [token, setToken] = useState('')
@@ -46,6 +62,9 @@ export function SyncModal() {
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [confirmPull, setConfirmPull] = useState(false)
+  const [cloudStatus, setCloudStatus] = useState<CloudSyncStatus | null>(null)
+  const [cloudBusy, setCloudBusy] = useState<CloudBusy>(null)
+  const [deviceStart, setDeviceStart] = useState<CloudDeviceStart | null>(null)
 
   useEffect(() => {
     if (!open) return
@@ -53,9 +72,13 @@ export function SyncModal() {
     setNotice(null)
     setConfirmPull(false)
     setToken('')
+    setDeviceStart(null)
     githubSyncStatus()
       .then(setStatus)
       .catch(() => setStatus(null))
+    cloudSyncStatus()
+      .then(setCloudStatus)
+      .catch(() => setCloudStatus(null))
   }, [open])
 
   const connected = status?.connected ?? false
@@ -127,6 +150,75 @@ export function SyncModal() {
       setError(mapError(e))
     } finally {
       setBusy(null)
+    }
+  }
+
+  const onCloudSignIn = async () => {
+    setCloudBusy('signin')
+    setError(null)
+    setNotice(null)
+    try {
+      const start = await cloudSyncDeviceStart()
+      setDeviceStart(start)
+      void openInBrowser(start.verification_uri)
+      const next = await cloudSyncDeviceFinish(start)
+      setCloudStatus(next)
+    } catch (e) {
+      setError(mapError(e))
+    } finally {
+      setDeviceStart(null)
+      setCloudBusy(null)
+    }
+  }
+
+  const onCloudPush = async () => {
+    setCloudBusy('push')
+    setError(null)
+    setNotice(null)
+    try {
+      const payload = await buildCloudPayload(useProjectsStore.getState().preferences)
+      const next = await cloudSyncPush(payload)
+      setCloudStatus(next)
+      setNotice(t('sync.cloud.pushDone'))
+    } catch (e) {
+      setError(mapError(e))
+    } finally {
+      setCloudBusy(null)
+    }
+  }
+
+  const onCloudPull = async () => {
+    setCloudBusy('pull')
+    setError(null)
+    setNotice(null)
+    try {
+      const payload = await cloudSyncPull()
+      const applied = await applyCloudPayload(payload, setPreferences)
+      if (!applied) {
+        setError(t('sync.error.malformed_payload'))
+        return
+      }
+      const next = await cloudSyncStatus()
+      setCloudStatus(next)
+      setNotice(t('sync.cloud.pullDone'))
+    } catch (e) {
+      setError(mapError(e))
+    } finally {
+      setCloudBusy(null)
+    }
+  }
+
+  const onCloudLogout = async () => {
+    setCloudBusy('logout')
+    setError(null)
+    setNotice(null)
+    try {
+      const next = await cloudSyncLogout()
+      setCloudStatus(next)
+    } catch (e) {
+      setError(mapError(e))
+    } finally {
+      setCloudBusy(null)
     }
   }
 
@@ -281,27 +373,132 @@ export function SyncModal() {
           )}
         </section>
 
-        {/* ---- Nuvem (em breve / premium) ---- */}
-        <section className={`${styles.card} ${styles.cardSoon}`}>
-          <header className={styles.cardHead}>
-            <span className={styles.cardIcon}>
-              <Cloud size={18} />
-            </span>
-            <div className={styles.cardTitleWrap}>
-              <div className={styles.cloudTitleRow}>
+        {cloudStatus?.configured ? (
+          <section className={styles.card}>
+            <header className={styles.cardHead}>
+              <span className={styles.cardIcon}>
+                <Cloud size={18} />
+              </span>
+              <div className={styles.cardTitleWrap}>
                 <h3 className={styles.cardTitle}>{t('sync.cloud.title')}</h3>
-                <span className={styles.badge}>{t('sync.cloud.soon')}</span>
+                {cloudStatus.connected ? (
+                  <span className={styles.connected}>
+                    <span className={styles.dot} />
+                    {t('sync.cloud.connectedAs', { login: cloudStatus.login ?? '—' })}
+                  </span>
+                ) : (
+                  <p className={styles.cardDesc}>{t('sync.cloud.freeDesc')}</p>
+                )}
               </div>
-              <p className={styles.cardDesc}>{t('sync.cloud.desc')}</p>
+            </header>
+
+            {cloudStatus.connected ? (
+              <>
+                <div className={styles.actions}>
+                  <button
+                    type="button"
+                    className={styles.btn}
+                    disabled={cloudBusy !== null}
+                    onClick={onCloudPush}
+                  >
+                    {cloudBusy === 'push' ? (
+                      <Loader2 size={14} className={styles.spin} />
+                    ) : (
+                      <Upload size={14} />
+                    )}
+                    {cloudBusy === 'push' ? t('sync.github.pushing') : t('sync.github.push')}
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.btn}
+                    disabled={cloudBusy !== null}
+                    onClick={onCloudPull}
+                  >
+                    {cloudBusy === 'pull' ? (
+                      <Loader2 size={14} className={styles.spin} />
+                    ) : (
+                      <Download size={14} />
+                    )}
+                    {cloudBusy === 'pull' ? t('sync.github.pulling') : t('sync.github.pull')}
+                  </button>
+                </div>
+
+                <div className={styles.meta}>
+                  <span>
+                    {t('sync.github.lastPush', { when: formatWhen(cloudStatus.last_push_ms) })}
+                  </span>
+                  <span>
+                    {t('sync.github.lastPull', { when: formatWhen(cloudStatus.last_pull_ms) })}
+                  </span>
+                </div>
+
+                <div className={styles.cardFooter}>
+                  <span className={styles.premium}>{t('sync.cloud.premiumSoon')}</span>
+                  <button
+                    type="button"
+                    className={styles.linkDanger}
+                    disabled={cloudBusy !== null}
+                    onClick={onCloudLogout}
+                  >
+                    <LogOut size={12} />
+                    {t('sync.github.disconnect')}
+                  </button>
+                </div>
+              </>
+            ) : deviceStart ? (
+              <div className={styles.deviceFlow}>
+                <p className={styles.hint}>{t('sync.cloud.codeHint')}</p>
+                <span className={styles.deviceCode}>{deviceStart.user_code}</span>
+                <button
+                  type="button"
+                  className={styles.link}
+                  onClick={() => void openInBrowser(deviceStart.verification_uri)}
+                >
+                  {t('sync.cloud.openGithub')}
+                </button>
+                <p className={styles.hint}>{t('sync.cloud.waiting')}</p>
+              </div>
+            ) : (
+              <div className={styles.connectForm}>
+                <button
+                  type="button"
+                  className={styles.btnPrimary}
+                  disabled={cloudBusy !== null}
+                  onClick={onCloudSignIn}
+                >
+                  {cloudBusy === 'signin' ? (
+                    <Loader2 size={14} className={styles.spin} />
+                  ) : (
+                    <Github size={14} />
+                  )}
+                  {cloudBusy === 'signin' ? t('sync.cloud.waiting') : t('sync.cloud.signIn')}
+                </button>
+                <p className={styles.hint}>{t('sync.cloud.premiumSoon')}</p>
+              </div>
+            )}
+          </section>
+        ) : (
+          <section className={`${styles.card} ${styles.cardSoon}`}>
+            <header className={styles.cardHead}>
+              <span className={styles.cardIcon}>
+                <Cloud size={18} />
+              </span>
+              <div className={styles.cardTitleWrap}>
+                <div className={styles.cloudTitleRow}>
+                  <h3 className={styles.cardTitle}>{t('sync.cloud.title')}</h3>
+                  <span className={styles.badge}>{t('sync.cloud.soon')}</span>
+                </div>
+                <p className={styles.cardDesc}>{t('sync.cloud.desc')}</p>
+              </div>
+            </header>
+            <div className={styles.cloudFoot}>
+              <span className={styles.premium}>{t('sync.cloud.premium')}</span>
+              <button type="button" className={styles.btn} disabled>
+                {t('sync.cloud.cta')}
+              </button>
             </div>
-          </header>
-          <div className={styles.cloudFoot}>
-            <span className={styles.premium}>{t('sync.cloud.premium')}</span>
-            <button type="button" className={styles.btn} disabled>
-              {t('sync.cloud.cta')}
-            </button>
-          </div>
-        </section>
+          </section>
+        )}
       </div>
 
       {error ? <p className={styles.error}>{error}</p> : null}

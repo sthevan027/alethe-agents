@@ -14,6 +14,7 @@ mod claude_usage;
 mod cli_launch;
 mod cli_resolver;
 mod cli_shim;
+mod cloud_sync;
 mod codex_app_server;
 mod codex_sessions;
 mod codex_usage;
@@ -51,6 +52,9 @@ mod path_guard;
 mod paths;
 mod planning;
 mod planning_gate;
+mod plugin_assets;
+mod plugin_catalog;
+mod plugin_package;
 mod plugins;
 mod process_tree;
 mod profiles;
@@ -61,6 +65,7 @@ mod pty;
 mod remote;
 mod resource_manager;
 mod resources;
+mod router9;
 mod scheduler;
 mod session_watcher;
 mod skills;
@@ -163,11 +168,15 @@ pub fn run() {
         .manage(planning::PlanningWatchers::default())
         .manage(cli_launch::PendingOpen::default())
         .manage(orchestrator::OrchestratorState::default())
+        .manage(router9::Router9Process::default())
         .manage(speech::SpeechState::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_updater::Builder::new().build());
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .register_uri_scheme_protocol("alethe-plugin", |ctx, request| {
+            plugin_assets::serve(ctx.app_handle(), &request)
+        });
 
     #[cfg(desktop)]
     {
@@ -205,6 +214,11 @@ pub fn run() {
                 webview_media::grant_media_permissions(&window);
             }
             logging::set_logs_dir(app.handle());
+            if let Ok(dir) = paths::profile_data_dir(app.handle()) {
+                process_tree::set_roots_file_dir(dir);
+                let _ = process_tree::sweep_orphans_from_previous_session();
+                process_tree::start_orphan_sweeper();
+            }
             // Keep the terminal launcher available after installation.
             #[cfg(not(debug_assertions))]
             let _ = cli_shim::cli_shim_install();
@@ -243,11 +257,17 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             agent_events::agent_hooks_settings_path,
+            agent_events::codex_hooks_config_write,
+            agent_events::codex_mcp_config_write,
             agent_events::agent_hooks_endpoint,
             agent_events::agent_hooks_token,
             orchestrator::orchestrator_mcp_config_path,
             orchestrator::orchestrator_jobs,
             orchestrator::orchestrator_set_concurrency,
+            orchestrator::orchestrator_set_agent_fitness,
+            orchestrator::orchestrator_message,
+            orchestrator::orchestrator_answer,
+            orchestrator::orchestrator_job_diff,
             browser_session::browser_session_start,
             browser_session::browser_session_stop,
             browser_session::browser_session_status,
@@ -304,8 +324,11 @@ pub fn run() {
             remote::remote_control_set_read_only,
             remote::remote_control_set_shell_input,
             remote::remote_control_set_enabled,
+            remote::remote_control_tailscale_status,
+            remote::remote_control_set_reach_mode,
             pty::resize_pty,
             pty::kill_pty,
+            pty::kill_ptys,
             pty::suspend_pty,
             pty::get_pty_cwd,
             pty::set_pty_read_state,
@@ -348,6 +371,12 @@ pub fn run() {
             github_sync::github_sync_logout,
             github_sync::github_sync_push,
             github_sync::github_sync_pull,
+            cloud_sync::cloud_sync_status,
+            cloud_sync::cloud_sync_device_start,
+            cloud_sync::cloud_sync_device_finish,
+            cloud_sync::cloud_sync_logout,
+            cloud_sync::cloud_sync_push,
+            cloud_sync::cloud_sync_pull,
             github_pr::github_pr_find,
             github_pr::github_pr_merge,
             github_pr::github_pr_list_mine,
@@ -397,10 +426,10 @@ pub fn run() {
             claude_sessions::snapshot_claude_sessions,
             claude_sessions::list_claude_sessions,
             claude_sessions::get_claude_session_title,
-            claude_sessions::get_claude_session_title,
             claude_sessions::get_claude_activity,
             claude_sessions::get_multi_agent_activity,
             codex_sessions::snapshot_codex_sessions,
+            codex_sessions::get_codex_session_title,
             handoff::prepare_agent_handoff,
             handoff::materialize_agent_handoff,
             handoff::complete_agent_handoff,
@@ -408,6 +437,7 @@ pub fn run() {
             cursor_sessions::create_cursor_chat,
             claude_usage::get_claude_usage,
             codex_usage::get_codex_usage,
+            codex_usage::consume_codex_reset_credit,
             antigravity_usage::get_antigravity_usage,
             agent_cost::get_session_cost,
             agent_cost::get_transcript_cost,
@@ -483,9 +513,23 @@ pub fn run() {
             ai_memory::ai_memory_mcp_config_path,
             ai_memory::ai_memory_opencode_config_write,
             ai_memory::ai_memory_codex_config_write,
+            router9::router9_status,
+            router9::router9_install_command,
+            router9::router9_uninstall_command,
+            router9::router9_start,
+            router9::router9_stop,
             plugins::plugins_list,
+            plugins::plugins_disabled,
+            plugins::plugins_dir,
             plugins::plugin_install,
+            plugins::plugin_import_dir,
             plugins::plugin_uninstall,
+            plugins::plugin_set_enabled,
+            plugin_catalog::plugin_catalog,
+            plugin_catalog::plugin_catalog_open,
+            plugin_catalog::plugin_install_from_catalog,
+            plugins::plugin_storage_read,
+            plugins::plugin_storage_write,
             mcp_store::mcp_scan,
             mcp_store::mcp_config_paths,
             mcp_store::mcp_capabilities,
@@ -513,6 +557,7 @@ pub fn run() {
                 browser_session::kill_running_session(
                     &_app_handle.state::<browser_session::BrowserSessionState>(),
                 );
+                router9::stop_managed(&_app_handle.state::<router9::Router9Process>());
             }
 
             if let tauri::RunEvent::Exit = event {

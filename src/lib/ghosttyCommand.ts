@@ -1,4 +1,5 @@
-import { agentCliCommand, type AgentType } from './types'
+import { resolveAgentCliCommand } from './agentProviders'
+import type { AgentType } from './types'
 
    
                                                                               
@@ -12,7 +13,7 @@ import { agentCliCommand, type AgentType } from './types'
                        
    
 export function buildGhosttyCommand(type: AgentType, extraArgs?: string[]): string | undefined {
-  const command = agentCliCommand(type)
+  const command = resolveAgentCliCommand(type)
   if (!command) return undefined
   const parts = [command, ...(extraArgs ?? []).map(shellQuote)]
   return parts.join(' ')

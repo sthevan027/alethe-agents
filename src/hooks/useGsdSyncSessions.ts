@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef } from 'react'
 import { create } from 'zustand'
 
 import { readGsdChildBusy, readGsdChildError, readGsdChildSession } from '../lib/tauri'
-import { useProjectsStore } from '../stores/projectsStore'
+import type { Project } from '../lib/types'
+import { selectActiveProject, useProjectsStore } from '../stores/projectsStore'
 
 export type GsdSyncSession = {
   id: string
@@ -39,9 +40,28 @@ const useGsdSyncSessionsStore = create<{ sessions: GsdSyncSession[] }>(() => ({ 
  * content directly via `opencode export <childId>` (`GsdSyncActivityView`) —
  * a read-only HTML `<div>`, with no PTY terminal in the path.
  */
+export function projectHasOpenCode(project: Project | null | undefined): boolean {
+  return Boolean(
+    project?.terminals.some((term) => term.tabs.some((tab) => tab.type === 'opencode')),
+  )
+}
+
+export function useGsdSyncFeatureEnabled(): boolean {
+  return useProjectsStore((s) => Boolean(s.preferences.enabledFeatures.gsdSync))
+}
+
+/** GSD Sync surfaces only exist behind the feature flag AND in a project that
+ *  actually runs OpenCode — every other project has nothing to show. */
+export function useGsdSyncAvailable(): boolean {
+  const featureEnabled = useGsdSyncFeatureEnabled()
+  const hasOpenCode = useProjectsStore((s) => projectHasOpenCode(selectActiveProject(s)))
+  return featureEnabled && hasOpenCode
+}
+
 export function useGsdSyncSessionsWatcher(
   onChildError?: (session: { projectId: string; worktreePath: string }, message: string) => void,
 ): void {
+  const featureEnabled = useGsdSyncFeatureEnabled()
   const projects = useProjectsStore((s) => s.projects)
 
   const pollingRef = useRef<Set<string>>(new Set())
@@ -52,6 +72,7 @@ export function useGsdSyncSessionsWatcher(
   // + cwd + watcher enabled on the project) — no worktree isolation required.
   const watched: WatchedItem[] = useMemo(() => {
     const result: WatchedItem[] = []
+    if (!featureEnabled) return result
     for (const proj of projects) {
       if (!proj.gsdWatcherEnabled) continue
       for (const term of proj.terminals) {
@@ -64,7 +85,7 @@ export function useGsdSyncSessionsWatcher(
       }
     }
     return result
-  }, [projects])
+  }, [featureEnabled, projects])
 
   useEffect(() => {
     if (watched.length === 0) {

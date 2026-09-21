@@ -68,25 +68,50 @@ describe('production renderer security policy', () => {
     expect(directives.get('base-uri')).toEqual(["'none'"])
     expect(directives.get('form-action')).toEqual(["'none'"])
     expect(directives.get('frame-ancestors')).toEqual(["'none'"])
-    expect(directives.get('script-src')).toEqual(["'self'"])
+    // Local plugins are served from a per-plugin, traversal-checked scheme
+    // (src-tauri/src/plugin_assets.rs). No remote origin, no eval.
+    expect(directives.get('script-src')).toEqual([
+      "'self'",
+      'alethe-plugin:',
+      'http://alethe-plugin.localhost',
+    ])
     expect(directives.get('script-src')).not.toContain("'unsafe-inline'")
     expect(directives.get('script-src')).not.toContain("'unsafe-eval'")
+    expect(directives.get('script-src')).not.toContain('http:')
+    expect(directives.get('script-src')).not.toContain('https:')
   })
 
   it('keeps only the audited runtime source requirements', () => {
     const directives = productionDirectives()
 
-    expect(directives.get('style-src')).toEqual(["'self'", "'unsafe-inline'"])
+    expect(directives.get('style-src')).toEqual([
+      "'self'",
+      "'unsafe-inline'",
+      'alethe-plugin:',
+      'http://alethe-plugin.localhost',
+    ])
     expect(directives.get('img-src')).toEqual([
       "'self'",
       'data:',
       'asset:',
       'http://asset.localhost',
+      'alethe-plugin:',
+      'http://alethe-plugin.localhost',
       'http:',
       'https:',
     ])
-    expect(directives.get('media-src')).toEqual(["'self'", 'asset:', 'http://asset.localhost'])
-    expect(directives.get('font-src')).toEqual(["'self'"])
+    expect(directives.get('media-src')).toEqual([
+      "'self'",
+      'asset:',
+      'http://asset.localhost',
+      'mediastream:',
+      'blob:',
+    ])
+    expect(directives.get('font-src')).toEqual([
+      "'self'",
+      'alethe-plugin:',
+      'http://alethe-plugin.localhost',
+    ])
     expect(directives.get('connect-src')).toEqual([
       "'self'",
       'ipc:',

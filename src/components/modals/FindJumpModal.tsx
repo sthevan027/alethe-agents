@@ -1,6 +1,8 @@
 import {
   Bot,
   Boxes,
+  ChevronRight,
+  Cloud,
   Code2,
   Gift,
   MousePointer2,
@@ -10,15 +12,17 @@ import {
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
+import { commandContributions, commandLabel, useContributions } from '../../lib/plugins'
 import { useProjectsStore } from '../../stores/projectsStore'
 import { useUiStore } from '../../stores/uiStore'
-import type { AgentType } from '../../lib/types'
+import type { AgentType, BuiltinAgentType } from '../../lib/types'
 import { useT } from '../../lib/i18n'
 import { Modal } from './Modal'
 import controls from './controls.module.css'
 
-const ICONS: Record<AgentType, LucideIcon> = {
+const ICONS: Record<BuiltinAgentType, LucideIcon> = {
   shell: Terminal,
+  wsl: Terminal,
   claude: Sparkles,
   codex: Code2,
   copilot: Bot,
@@ -27,9 +31,12 @@ const ICONS: Record<AgentType, LucideIcon> = {
   opencode: Boxes,
   freebuff: Gift,
   mimo: Bot,
+  kiro: Cloud,
 }
 
-type Hit = {
+type TerminalHit = {
+  kind: 'terminal'
+  key: string
   projectId: string
   projectName: string
   terminalId: string
@@ -37,6 +44,16 @@ type Hit = {
   type: AgentType
   cwd: string
 }
+
+type CommandHit = {
+  kind: 'command'
+  key: string
+  label: string
+  icon: LucideIcon | undefined
+  run: () => void | Promise<void>
+}
+
+type Hit = TerminalHit | CommandHit
 
 export function FindJumpModal() {
   const t = useT()
@@ -58,11 +75,29 @@ export function FindJumpModal() {
     }
   }, [open])
 
+  const commands = useContributions(commandContributions)
+
   const hits = useMemo<Hit[]>(() => {
-    const all: Hit[] = projects.flatMap((p) =>
+    const q = query.trim().toLowerCase()
+
+    const commandHits: CommandHit[] = commands
+      .map((command) => ({
+        kind: 'command' as const,
+        key: `command:${command.id}`,
+        label: commandLabel(t, command),
+        icon: command.icon as LucideIcon | undefined,
+        run: command.run,
+        haystack: `${commandLabel(t, command)} ${command.keywords ?? ''}`.toLowerCase(),
+      }))
+      .filter((hit) => !q || hit.haystack.includes(q))
+      .map(({ haystack: _haystack, ...hit }) => hit)
+
+    const terminalHits: TerminalHit[] = projects.flatMap((p) =>
       p.terminals.map((term) => {
         const active = term.tabs.find((s) => s.id === term.activeTabId) ?? term.tabs[0]
         return {
+          kind: 'terminal' as const,
+          key: `terminal:${p.id}:${term.id}`,
           projectId: p.id,
           projectName: p.name,
           terminalId: term.id,
@@ -72,14 +107,21 @@ export function FindJumpModal() {
         }
       }),
     )
-    const q = query.trim().toLowerCase()
-    if (!q) return all.slice(0, 50)
-    return all
-      .filter((h) => `${h.projectName} ${h.terminalName} ${h.cwd}`.toLowerCase().includes(q))
-      .slice(0, 50)
-  }, [projects, query])
+    const filteredTerminals = q
+      ? terminalHits.filter((h) =>
+          `${h.projectName} ${h.terminalName} ${h.cwd}`.toLowerCase().includes(q),
+        )
+      : terminalHits
+
+    return [...commandHits, ...filteredTerminals].slice(0, 50)
+  }, [commands, projects, query, t])
 
   const jump = (hit: Hit) => {
+    if (hit.kind === 'command') {
+      closeModal()
+      void hit.run()
+      return
+    }
     openTerminalWorkspace(hit.projectId, hit.terminalId)
     useUiStore.getState().setActiveView('workspace')
     useUiStore.getState().requestPaneFocus(hit.terminalId)
@@ -122,11 +164,14 @@ export function FindJumpModal() {
           </div>
         ) : (
           hits.map((hit, i) => {
-            const Icon = ICONS[hit.type]
+            const Icon =
+              hit.kind === 'command'
+                ? (hit.icon ?? ChevronRight)
+                : (ICONS[hit.type as BuiltinAgentType] ?? Bot)
             const active = i === cursor
             return (
               <button
-                key={`${hit.projectId}:${hit.terminalId}`}
+                key={hit.key}
                 type="button"
                 onClick={() => jump(hit)}
                 onMouseEnter={() => setCursor(i)}
@@ -145,9 +190,19 @@ export function FindJumpModal() {
                 }}
               >
                 <Icon size={14} />
-                <span style={{ fontWeight: 500 }}>{hit.terminalName}</span>
-                <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>· {hit.projectName}</span>
-                {hit.cwd ? (
+                <span style={{ fontWeight: 500 }}>
+                  {hit.kind === 'command' ? hit.label : hit.terminalName}
+                </span>
+                {hit.kind === 'terminal' ? (
+                  <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
+                    · {hit.projectName}
+                  </span>
+                ) : (
+                  <span style={{ fontSize: 11, color: 'var(--fg-muted)' }}>
+                    · {t('term.findCommandGroup')}
+                  </span>
+                )}
+                {hit.kind === 'terminal' && hit.cwd ? (
                   <span
                     style={{
                       marginLeft: 'auto',

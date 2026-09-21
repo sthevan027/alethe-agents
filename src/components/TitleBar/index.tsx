@@ -25,13 +25,15 @@ import {
 import { useEffect, useRef, useState } from 'react'
 
 import { requestAppClose } from '../../hooks/useCloseConfirmation'
+import { useRouter9Runtime } from '../../hooks/useRouter9Runtime'
 import { getCachedAntigravityUsage } from '../../lib/antigravityUsageCache'
 import { getCachedClaudeUsage } from '../../lib/claudeUsageCache'
 import { getCachedCodexUsage } from '../../lib/codexUsageCache'
 import { useT } from '../../lib/i18n'
+import { useSidebarViews } from '../../lib/viewPlacement'
 import { observeClaudeReset, observeCodexReset } from '../../lib/limitResetWatch'
 import { formatShortcut } from '../../lib/platform'
-import { killPty, remoteControlConnectedDevices } from '../../lib/tauri'
+import { killPty, remoteControlInfo } from '../../lib/tauri'
 import { usePomodoroStore } from '../../stores/pomodoroStore'
 import { useProjectsStore } from '../../stores/projectsStore'
 import { useUiStore } from '../../stores/uiStore'
@@ -90,6 +92,23 @@ function MemoryPillButton({ ramMb }: { ramMb: number }) {
       onClick={() => openModal('memoryAnalytics')}
     >
       {ramMb.toFixed(0)} MB
+    </button>
+  )
+}
+
+function Router9PillButton() {
+  const t = useT()
+  const { config, status, hasInstall, busy, start, stop } = useRouter9Runtime()
+  if (!config.enabled || !hasInstall) return null
+  return (
+    <button
+      type="button"
+      className={`${styles.ramPill} ${status?.running ? '' : styles.ramPressureMedium}`}
+      title={status?.running ? t('router9.pillStop') : t('router9.pillStart')}
+      disabled={busy}
+      onClick={() => void (status?.running ? stop() : start()).catch(() => undefined)}
+    >
+      9router {status?.running ? t('router9.pillOn') : t('router9.pillOff')}
     </button>
   )
 }
@@ -254,10 +273,8 @@ export function TitleBar() {
   const activeProfileId = useProjectsStore((s) => s.activeProfileId)
   const preferences = useProjectsStore((s) => s.preferences)
   const setPreferences = useProjectsStore((s) => s.setPreferences)
-  const rightPanelEnabled =
-    preferences.enabledFeatures.todos ||
-    preferences.enabledFeatures.mcp ||
-    (preferences.enabledFeatures.git && preferences.gitControlPlacement === 'right')
+  const rightSidebarTabs = useSidebarViews('right')
+  const rightPanelEnabled = preferences.enabledFeatures.mcp || rightSidebarTabs.length > 0
   const toggleWorkspaceTabPinned = useProjectsStore((s) => s.toggleWorkspaceTabPinned)
   const closeSavedWorkspaceTab = useProjectsStore((s) => s.closeSavedWorkspaceTab)
   const addWorkspaceTabToCurrent = useProjectsStore((s) => s.addWorkspaceTabToCurrent)
@@ -265,14 +282,20 @@ export function TitleBar() {
   const navigateWorkspaceHistory = useProjectsStore((s) => s.navigateWorkspaceHistory)
   const [tabMenu, setTabMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null)
   const [remoteConnectedDevices, setRemoteConnectedDevices] = useState(0)
+  const [remoteBackendEnabled, setRemoteBackendEnabled] = useState(false)
   const activeProfile = profiles.find((profile) => profile.id === activeProfileId) ?? null
   const threeAreas = preferences.topbarStyle === 'three-areas'
   const antigravityReady =
     antigravityUsage?.status === 'ready' && antigravityUsage.buckets.length > 0
-  const remoteConnectedLabel = t(
-    remoteConnectedDevices === 1 ? 'remote.topbarDeviceConnected' : 'remote.topbarDevicesConnected',
-    { count: remoteConnectedDevices },
-  )
+  const remoteConnectedLabel =
+    remoteConnectedDevices > 0
+      ? t(
+          remoteConnectedDevices === 1
+            ? 'remote.topbarDeviceConnected'
+            : 'remote.topbarDevicesConnected',
+          { count: remoteConnectedDevices },
+        )
+      : t('remote.topbarEnabledIdle')
 
   const closeAgentPlanning = () => {
     if (!agentCanvasSession) return
@@ -291,12 +314,16 @@ export function TitleBar() {
     const refreshRemoteDevices = async () => {
       if (!activeRef.current) return
       try {
-        const connectedDevices = await remoteControlConnectedDevices()
+        const info = await remoteControlInfo()
         if (!cancelled) {
-          setRemoteConnectedDevices(connectedDevices)
+          setRemoteConnectedDevices(info.connected_devices)
+          setRemoteBackendEnabled(info.enabled)
         }
       } catch {
-        if (!cancelled) setRemoteConnectedDevices(0)
+        if (!cancelled) {
+          setRemoteConnectedDevices(0)
+          setRemoteBackendEnabled(false)
+        }
       }
     }
     void refreshRemoteDevices()
@@ -685,10 +712,14 @@ export function TitleBar() {
             ) : null}
           </div>
           <div className={styles.statusGroup}>
-            {remoteConnectedDevices > 0 ? (
+            {remoteBackendEnabled ? (
               <button
                 type="button"
-                className={styles.remoteDevicePill}
+                className={
+                  remoteConnectedDevices > 0
+                    ? styles.remoteDevicePill
+                    : `${styles.remoteDevicePill} ${styles.remoteDevicePillIdle}`
+                }
                 onClick={() => openModal('remoteControl')}
                 title={remoteConnectedLabel}
                 aria-label={remoteConnectedLabel}
@@ -848,6 +879,7 @@ export function TitleBar() {
             {preferences.topbarShowMemory && ramMb !== null ? (
               <MemoryPillButton ramMb={ramMb} />
             ) : null}
+            {preferences.topbarShowRouter9 ? <Router9PillButton /> : null}
             <button
               type="button"
               className={styles.editWidgets}

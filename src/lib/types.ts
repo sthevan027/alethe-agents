@@ -1,5 +1,7 @@
-export type AgentType =
+/** Agent providers that ship with the app; their data lives in this file. */
+export type BuiltinAgentType =
   | 'shell'
+  | 'wsl'
   | 'claude'
   | 'codex'
   | 'copilot'
@@ -8,8 +10,17 @@ export type AgentType =
   | 'freebuff'
   | 'mimo'
   | 'antigravity'
+  | 'kiro'
 
-export const AGENT_TYPE_LABELS: Record<AgentType, string> = {
+/**
+ * An agent type id. Open on purpose: plugins contribute agent providers at
+ * runtime, so an unknown string here is a contributed provider, not a bug. Use
+ * `isBuiltinAgentType` or the resolvers in `agentProviders.ts` before assuming
+ * an id resolves.
+ */
+export type AgentType = BuiltinAgentType | (string & {})
+
+export const AGENT_TYPE_LABELS: Record<BuiltinAgentType, string> = {
   claude: 'Claude Code',
   codex: 'Codex',
   copilot: 'GitHub Copilot',
@@ -18,10 +29,12 @@ export const AGENT_TYPE_LABELS: Record<AgentType, string> = {
   opencode: 'OpenCode',
   mimo: 'Mimo',
   freebuff: 'Freebuff',
+  kiro: 'Kiro CLI',
   shell: 'Shell',
+  wsl: 'WSL',
 }
 
-export const ALL_AGENT_TYPES: AgentType[] = [
+export const ALL_AGENT_TYPES: BuiltinAgentType[] = [
   'claude',
   'codex',
   'copilot',
@@ -30,18 +43,31 @@ export const ALL_AGENT_TYPES: AgentType[] = [
   'opencode',
   'mimo',
   'freebuff',
+  'kiro',
   'shell',
+  'wsl',
 ]
 
-/** CLI binaries whose name differs from the agent id (`agy`, `cursor-agent`). */
-const AGENT_CLI_COMMANDS: Partial<Record<AgentType, string>> = {
-  antigravity: 'agy',
-  cursor: 'cursor-agent',
+/** Types that open a plain shell — no agent CLI session semantics. */
+export function isShellAgentType(agent: AgentType): boolean {
+  return agent === 'shell' || agent === 'wsl'
 }
 
+/** Built-in CLI binary, when it differs from the agent id. */
+const BUILTIN_CLI_COMMANDS: Partial<Record<BuiltinAgentType, string | null>> = {
+  shell: null,
+  wsl: 'wsl.exe',
+  antigravity: 'agy',
+  cursor: 'cursor-agent',
+  kiro: 'kiro-cli',
+}
+
+/** Built-ins only. Use `resolveAgentCliCommand` to also reach contributed providers. */
 export function agentCliCommand(agent: AgentType): string | undefined {
-  if (agent === 'shell') return undefined
-  return AGENT_CLI_COMMANDS[agent] ?? agent
+  if (!(agent in AGENT_TYPE_LABELS)) return undefined
+  const mapped = BUILTIN_CLI_COMMANDS[agent as BuiltinAgentType]
+  if (mapped === null) return undefined
+  return mapped ?? agent
 }
 
 export type Locale = 'en' | 'pt-BR'
@@ -72,7 +98,8 @@ export type GridLayoutHistoryEntry = {
   layout: GridLayout
 }
 
-export type Theme =
+/** Themes whose token blocks live in `src/styles/theme.css`. */
+export type BuiltinTheme =
   | 'dark'
   | 'light'
   | 'dracula'
@@ -83,14 +110,19 @@ export type Theme =
   | 'vscode'
   | 'min-dark'
   | 'min-light'
-  | 'dark-lemon'
-  | 'orca'
-  | 'ember'
-  | 'golden-premium'
   | 'elite-original'
   | 'elite-pure-black'
   | 'elite-indigo'
   | 'elite-blush'
+  | 'catppuccin-frappe'
+  | 'gruvbox-material'
+
+/**
+ * A theme id. Open on purpose: plugins contribute themes at runtime, so an
+ * unknown string here is a plugin theme, not a bug. Use `isBuiltinTheme` or the
+ * theme registry before assuming an id resolves.
+ */
+export type Theme = BuiltinTheme | (string & {})
 
 /** Native desktop icon variants. The UI theme and app icon theme are independent. */
 export type AppIconTheme = 'elite-original' | 'elite-pure-black' | 'elite-indigo' | 'elite-blush'
@@ -99,16 +131,12 @@ export type VisualStyle = 'normal' | 'clean'
 
 export type MotionPreference = 'animated' | 'reduced'
 
+export type SetupWalkthroughStep = 'project' | 'appearance'
+
+export const SETUP_WALKTHROUGH_STEPS: SetupWalkthroughStep[] = ['project', 'appearance']
+
 export type FeatureId =
-  | 'todos'
-  | 'git'
-  | 'browser'
-  | 'graphify'
-  | 'aiMemory'
-  | 'mcp'
-  | 'playwright'
-  | 'orchestrator'
-  | 'prs'
+  'browser' | 'graphify' | 'aiMemory' | 'mcp' | 'playwright' | 'orchestrator' | 'prs' | 'gsdSync'
 
 export type TodoItem = {
   id: string
@@ -162,6 +190,8 @@ export type SubTab = {
   handoff?: AgentHandoffBootstrap
 
   runtimeProfile?: AgentRuntimeProfile
+  /** Route this agent's API traffic through the local 9router proxy. */
+  useRouter9?: boolean
 }
 
 export type AgentHandoffBootstrap = {
@@ -174,11 +204,10 @@ export type AgentHandoffBootstrap = {
 
 export type AgentRuntimeProfile = 'full' | 'lean' | 'diagnostic'
 
-/** Flag de "modo irrestrito" por agente (skip permissions / approvals). */
-
-/** Flag de "modo irrestrito" por agente (skip permissions / approvals). */
-export const UNRESTRICTED_FLAG: Record<AgentType, string | null> = {
+/** Unrestricted-mode flag per agent (skip permissions / approvals). */
+export const UNRESTRICTED_FLAG: Record<BuiltinAgentType, string | null> = {
   shell: null,
+  wsl: null,
   claude: '--dangerously-skip-permissions',
   codex: '--dangerously-bypass-approvals-and-sandbox',
   copilot: '--allow-all',
@@ -188,10 +217,19 @@ export const UNRESTRICTED_FLAG: Record<AgentType, string | null> = {
   freebuff: null,
   mimo: null,
   antigravity: '--dangerously-skip-permissions',
+  kiro: '--trust-all-tools',
 }
 
 export type PaneKind =
-  'terminal' | 'markdown' | 'file' | 'image' | 'video' | 'web' | 'graphify' | 'diff'
+  | 'terminal'
+  | 'markdown'
+  | 'file'
+  | 'image'
+  | 'video'
+  | 'web'
+  | 'graphify'
+  | 'diff'
+  | 'orchestrator'
 
 export type BrowserResourceMode = 'app-first' | 'balanced' | 'keep-alive'
 
@@ -223,6 +261,7 @@ export type BrowserPaneOptions = BrowserPaneConfig & {
 }
 
 export type Terminal = {
+  gridId?: string
   id: string
   name: string
   cwd: string
@@ -271,13 +310,17 @@ export type Terminal = {
    * fixed for `gsdSyncViewer`).
    */
   ephemeralUtility?: boolean
-  /** Hides this terminal and its output from every paired remote device. */
+  /** @deprecated Migration-only. Superseded by `remoteShared` (opt-in). */
   remoteExcluded?: boolean
+  /** Exposes this terminal and its output to paired remote devices. Off by default. */
+  remoteShared?: boolean
 }
 
 export type PaneGroup = {
   id: string
   paneIds: string[]
+  /** Dedicated groups keep related panes together without changing the project's outer layout. */
+  kind?: 'orchestration'
 }
 
 export type OrphanWorktree = {
@@ -293,7 +336,18 @@ export type OrphanWorktree = {
   adminLockReason?: string
 }
 
+export type ProjectGrid = {
+  id: string
+  name: string
+  collapsed: boolean
+  layoutMode: LayoutMode
+  gridLayout?: GridLayout
+  gridLayoutHistory?: GridLayoutHistoryEntry[]
+}
+
 export type Project = {
+  grids?: ProjectGrid[]
+  activeGridId?: string
   id: string
   name: string
   /** Determines which workspace opens when the project is selected. */
@@ -387,6 +441,8 @@ export type Group = {
 }
 
 export type WorkspaceContainer = {
+  /** Present for a project grid; absent for explicitly composed pane selections. */
+  gridId?: string
   projectId: string
 
   paneIds: string[]
@@ -446,7 +502,33 @@ export type TerminalCreationPreset = {
     cwd: string
     extraArgs?: string[]
     runtimeProfile?: AgentRuntimeProfile
+    useRouter9?: boolean
   }
+}
+
+export const ROUTER9_DEFAULT_PORT = 20128
+
+/** Which 9router install Alethe runs: the one it manages, or one the user installed themselves. */
+export type Router9Source = 'managed' | 'external'
+
+/** Local 9router proxy. Opt-in and off by default — nothing is installed or started implicitly. */
+export type Router9Preferences = {
+  enabled: boolean
+  autoStart: boolean
+  source: Router9Source
+  port: number
+  /** Endpoint key issued by the 9router dashboard. Stored in plaintext, like the Spotify secret. */
+  apiKey: string
+  defaultForNewAgents: boolean
+}
+
+export const DEFAULT_ROUTER9_PREFERENCES: Router9Preferences = {
+  enabled: false,
+  autoStart: false,
+  source: 'managed',
+  port: ROUTER9_DEFAULT_PORT,
+  apiKey: '',
+  defaultForNewAgents: false,
 }
 
 export type Preferences = {
@@ -489,7 +571,10 @@ export type Preferences = {
 
   topbarStyle: 'classic' | 'three-areas'
   /** Local do controle Git: sidebar esquerda ou direita. */
-  gitControlPlacement: 'left' | 'right'
+  /** @deprecated Migrated into `viewPlacements.git`. Read only by the migration. */
+  gitControlPlacement?: 'left' | 'right'
+  /** Sidebar a contributed view sits in, overriding the container its manifest declares. */
+  viewPlacements: Record<string, 'left' | 'right'>
 
   /** Credenciais locais do Spotify Developer Dashboard para Now Playing. */
   spotifyClientId: string
@@ -503,6 +588,8 @@ export type Preferences = {
   topbarShowSync: boolean
   topbarShowProfile: boolean
   topbarShowMemory: boolean
+  /** Status pill for the local 9router proxy, with a one-click stop. */
+  topbarShowRouter9: boolean
   /** Starts the LAN remote listener on launch. Off until the user opts in. */
   remoteEnabled: boolean
   /** Maximum number of authenticated LAN remote devices. Default 1. */
@@ -513,14 +600,25 @@ export type Preferences = {
   remoteReadOnly: boolean
   /** Allows remote input on plain shell tabs, not only agent tabs. Default false. */
   remoteAllowShellInput: boolean
+  /** Binds the remote listener to the machine's Tailscale address instead of the LAN. Default false. */
+  remoteUseTailscale: boolean
 
   enabledFeatures: Record<FeatureId, boolean>
-  /** Folder configured as the base location for the global Todo list. */
+  /** Playwright MCP: attach to the shared/pane browser, or launch its own. */
+  playwrightBrowserMode: 'shared' | 'dedicated'
+  /** Only used when playwrightBrowserMode is 'dedicated'. */
+  playwrightDedicatedHeadless: boolean
+  /** Legacy: the Todo List plugin owns this now. Read by its migration only. */
   todoStoragePath: string
   /** Scope the MCP panel opens on. */
   mcpDefaultScope: McpScope
   /** True once the MCP setup prompt has been shown or dismissed. */
   mcpOnboardingSeen: boolean
+
+  /** Home checklist that continues the setup after onboarding hands over the app. */
+  setupWalkthrough: Record<SetupWalkthroughStep, boolean>
+  /** True once the user dismisses the Home checklist by hand. */
+  setupWalkthroughHidden: boolean
 
   leftSidebarVisible: boolean
   rightSidebarVisible: boolean
@@ -556,6 +654,8 @@ export type Preferences = {
 
   gsdSyncModelChain?: string[]
 
+  router9?: Router9Preferences
+
   /** Pomodoro cycle durations, in minutes. */
   pomodoroWorkMinutes: number
   pomodoroShortBreakMinutes: number
@@ -579,12 +679,16 @@ export type ResourcePolicyPreferences = {
 }
 
 export type ProjectsFile = {
-  version: 7
+  version: 9
   groups: Group[]
 
   ungroupedOrder: string[]
   projects: Project[]
 
+  /**
+   * Owned by the Todo List plugin now, and read only by its one-time
+   * migration. Kept persisted so removing the plugin cannot lose the list.
+   */
   todos: TodoItem[]
   activeProjectId: string | null
 
@@ -619,6 +723,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   terminalTheme: null,
   enabledAgents: {
     shell: true,
+    wsl: true,
     claude: true,
     codex: true,
     copilot: true,
@@ -627,6 +732,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
     opencode: true,
     freebuff: true,
     mimo: true,
+    kiro: true,
   },
   onboardingDone: false,
   workspaceFlat: false,
@@ -640,7 +746,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   alwaysStartUnrestricted: false,
   lastTerminalCreation: null,
   topbarStyle: 'classic',
-  gitControlPlacement: 'left',
+  viewPlacements: {},
   spotifyClientId: '',
   spotifyClientSecret: '',
   discordRichPresenceEnabled: false,
@@ -650,25 +756,30 @@ export const DEFAULT_PREFERENCES: Preferences = {
   topbarShowSync: true,
   topbarShowProfile: true,
   topbarShowMemory: true,
+  topbarShowRouter9: false,
   remoteEnabled: false,
   remoteMaxDevices: 1,
   remoteSessionExpirySecs: 3600,
   remoteReadOnly: true,
   remoteAllowShellInput: false,
+  remoteUseTailscale: false,
   enabledFeatures: {
-    todos: true,
-    git: true,
     browser: true,
     graphify: true,
     aiMemory: false,
+    gsdSync: false,
     mcp: true,
     playwright: false,
     orchestrator: false,
     prs: true,
   },
+  playwrightBrowserMode: 'shared',
+  playwrightDedicatedHeadless: false,
   todoStoragePath: '',
   mcpDefaultScope: 'global',
   mcpOnboardingSeen: false,
+  setupWalkthrough: { project: false, appearance: false },
+  setupWalkthroughHidden: false,
   leftSidebarVisible: true,
   rightSidebarVisible: true,
   leftSidebarWidth: 286,
@@ -698,7 +809,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
 }
 
 export const EMPTY_PROJECTS_FILE: ProjectsFile = {
-  version: 7,
+  version: 9,
   groups: [],
   ungroupedOrder: [],
   projects: [],
@@ -733,7 +844,7 @@ export const GROUP_COLORS = [
   '#10b981',
 ] as const
 
-export const PROVIDER_MODELS: Record<AgentType, { id: string; label: string }[]> = {
+export const PROVIDER_MODELS: Record<BuiltinAgentType, { id: string; label: string }[]> = {
   claude: [
     { id: 'claude-3-7-sonnet', label: 'Claude 3.7 Sonnet (Padrão)' },
     { id: 'claude-3-5-sonnet', label: 'Claude 3.5 Sonnet' },
@@ -766,13 +877,18 @@ export const PROVIDER_MODELS: Record<AgentType, { id: string; label: string }[]>
     { id: 'mimo-flash', label: 'Mimo Flash' },
   ],
   freebuff: [{ id: 'freebuff-auto', label: 'Freebuff Auto' }],
+  kiro: [
+    { id: 'claude-sonnet-4.5', label: 'Claude Sonnet 4.5 (Padrão)' },
+    { id: 'claude-haiku-4.5', label: 'Claude Haiku 4.5' },
+  ],
   shell: [{ id: 'default', label: 'Shell Padrão' }],
+  wsl: [{ id: 'default', label: 'WSL' }],
 }
 
 export type McpScope = 'global' | 'project'
 
 export type McpAgent = Extract<
-  AgentType,
+  BuiltinAgentType,
   'claude' | 'codex' | 'cursor' | 'opencode' | 'antigravity'
 >
 

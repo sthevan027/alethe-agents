@@ -58,7 +58,7 @@ export function NormalTerminalNode({
       {...listeners}
       className={`${styles.terminalRow} ${focused ? styles.terminalFocused : ''} ${
         !selected ? styles.terminalHidden : ''
-      } ${terminal.disabled ? styles.terminalDisabled : ''} ${isDragging ? styles.dragging : ''}`}
+      } ${terminal.disabled ? styles.terminalDisabled : ''} ${isWorking ? styles.terminalWorking : ''} ${isDragging ? styles.dragging : ''}`}
       onClick={() => onClick()}
       onDoubleClick={(event) => {
         event.stopPropagation()
@@ -111,10 +111,11 @@ export function NormalTerminalNode({
           />
         ) : hasUnreadCompletion ? (
           <span
-            className={`${styles.doneBadge} ${styles.rowStatusIndicator}`}
+            className={`${styles.doneGlyph} ${styles.rowStatusIndicator}`}
             title={t('ui.terminal.responseReady')}
+            aria-label={t('ui.terminal.responseReady')}
           >
-            !
+            ✓
           </span>
         ) : null}
         <button

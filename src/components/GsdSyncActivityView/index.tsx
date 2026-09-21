@@ -1,6 +1,7 @@
 import { Bot, Loader2, User, Wrench, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
+import { useGsdSyncFeatureEnabled } from '../../hooks/useGsdSyncSessions'
 import { useOnEscape } from '../../hooks/useOnEscape'
 import { useT } from '../../lib/i18n'
 import {
@@ -23,6 +24,7 @@ const POLL_INTERVAL_MS = 5000
  */
 export function GsdSyncActivityView() {
   const t = useT()
+  const featureEnabled = useGsdSyncFeatureEnabled()
   const view = useUiStore((s) => s.gsdSyncActivityView)
   const close = () => useUiStore.getState().setGsdSyncActivityView(null)
 
@@ -31,11 +33,11 @@ export function GsdSyncActivityView() {
       e.preventDefault()
       close()
     },
-    Boolean(view),
+    Boolean(view) && featureEnabled,
     { capture: true },
   )
 
-  if (!view) return null
+  if (!view || !featureEnabled) return null
   return (
     <div className={styles.backdrop} onClick={close}>
       <div

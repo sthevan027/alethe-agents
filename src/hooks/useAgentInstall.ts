@@ -10,7 +10,8 @@ import {
   spawnPty,
   writePty,
 } from '../lib/tauri'
-import { agentCliCommand, type AgentType } from '../lib/types'
+import { resolveAgentCliCommand } from '../lib/agentProviders'
+import type { AgentType } from '../lib/types'
 
 export type AgentInstallStatus = 'idle' | 'running' | 'success' | 'failed'
 
@@ -36,6 +37,8 @@ function trimLog(value: string): string {
   return value.length > MAX_LOG_CHARS ? value.slice(value.length - MAX_LOG_CHARS) : value
 }
 
+export { trimLog as trimInstallLog }
+
 /*
  * Package managers serialize badly: two `npm -g` runs fight over the same global directory, and
  * WinGet refuses to run twice at once. Only one agent operation is allowed at a time, app-wide.
@@ -46,6 +49,17 @@ const busyListeners = new Set<() => void>()
 function setBusyAgent(agent: string | null): void {
   busyAgent = agent
   for (const listener of busyListeners) listener()
+}
+
+/** Takes the app-wide package-manager lock, or returns false when another run already holds it. */
+export function acquireAgentOperation(key: string): boolean {
+  if (busyAgent !== null) return false
+  setBusyAgent(key)
+  return true
+}
+
+export function releaseAgentOperation(key: string): void {
+  if (busyAgent === key) setBusyAgent(null)
 }
 
 /** The agent whose install/uninstall is running right now, or null when nothing is. */
@@ -112,7 +126,7 @@ export function useAgentInstall(agent: AgentType, lockKey: string = agent) {
       setStatus('running')
       setBusyAgent(lockKey)
 
-      const command = method.verifyCommand ?? agentCliCommand(agent)
+      const command = method.verifyCommand ?? resolveAgentCliCommand(agent)
       // Only meaningful for an update of something already on PATH — a fresh install has
       // nothing to compare against, and verifyAbsent (uninstall) checks absence, not a version.
       const beforeVersion = command && !method.verifyAbsent ? await agentCliVersion(command) : null

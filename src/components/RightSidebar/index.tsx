@@ -3,14 +3,11 @@ import {
   ArrowLeft,
   ClipboardCopy,
   FileText,
-  GitBranch,
   GitPullRequest,
-  ListTodo,
   Maximize2,
   PanelRightClose,
   Plug,
   RefreshCw,
-  Settings,
   Sparkles,
   X,
 } from 'lucide-react'
@@ -25,11 +22,16 @@ import {
   useState,
 } from 'react'
 
-import { type GsdSyncSession, useGsdSyncSessions } from '../../hooks/useGsdSyncSessions'
+import {
+  type GsdSyncSession,
+  useGsdSyncAvailable,
+  useGsdSyncSessions,
+} from '../../hooks/useGsdSyncSessions'
 import { hasFileDragPayload, readFileDragPayload } from '../../lib/fileDrag'
 import { useT } from '../../lib/i18n'
 import { isMarkdownPath } from '../../lib/markdownSidebarHistory'
 import { basename } from '../../lib/paths'
+import { sidebarTabLabel, sidebarTabPanelLabel } from '../../lib/plugins'
 import {
   listProjectPlans,
   type PlanningStatus,
@@ -37,18 +39,16 @@ import {
   readTextFile,
   writeClipboardText,
 } from '../../lib/tauri'
-import type { Project, SubTab, Terminal } from '../../lib/types'
+import { useSidebarViews } from '../../lib/viewPlacement'
 import { selectActiveProject, useProjectsStore } from '../../stores/projectsStore'
 import { useUiStore } from '../../stores/uiStore'
-import { EmptyState } from '../EmptyState'
 
 const MarkdownRenderer = lazy(() =>
   import('../MarkdownPane/MarkdownRenderer').then((m) => ({ default: m.MarkdownRenderer })),
 )
+import { ContributedView } from '../ContributedView'
 import { McpPanel } from '../McpPanel'
-import { GitControl } from '../ProjectSidebar/GitControl'
 import { PullRequestsSidebar } from '../PullRequestsSidebar'
-import { TodoSidebar } from '../TodoSidebar'
 import { DotmCircular2 } from '../ui/dotm-circular-2'
 import styles from './RightSidebar.module.css'
 
@@ -57,9 +57,8 @@ const markdownScrollPositions = new Map<string, number>()
 export function RightSidebar() {
   const t = useT()
   const mode = useUiStore((state) => state.rightSidebarMode)
-  const setMode = useUiStore((state) => state.showTodoSidebar)
   const openMarkdown = useUiStore((state) => state.showMarkdownSidebar)
-  const showGit = useUiStore((state) => state.showGitSidebar)
+  const setRightSidebarMode = useUiStore((state) => state.setRightSidebarMode)
   const showGsdSyncSidebar = useUiStore((state) => state.showGsdSyncSidebar)
   const showMcp = useUiStore((state) => state.showMcpSidebar)
   const showPrs = useUiStore((state) => state.showPrsSidebar)
@@ -78,41 +77,27 @@ export function RightSidebar() {
     sidebarTerminal?.tabs.find((tab) => tab.id === sidebarTerminal.activeTabId) ??
     sidebarTerminal?.tabs[0]
 
-  const todoEnabled = preferences.enabledFeatures.todos
-  const gitEnabled = preferences.enabledFeatures.git && preferences.gitControlPlacement === 'right'
+  const contributedTabs = useSidebarViews('right')
+  const contributedTab = contributedTabs.find((tab) => tab.id === mode)
   const mcpEnabled = preferences.enabledFeatures.mcp
   const prsEnabled = preferences.enabledFeatures.prs
+  const gsdSyncAvailable = useGsdSyncAvailable()
   // The panel now survives its features being turned off one by one, so a mode whose
   // feature was disabled has to fall back instead of rendering a hidden feature.
   useEffect(() => {
     const modeStillEnabled =
       mode === 'markdown' ||
-      mode === 'gsdSync' ||
-      (mode === 'todo' && todoEnabled) ||
-      (mode === 'git' && gitEnabled) ||
+      (mode === 'gsdSync' && gsdSyncAvailable) ||
       (mode === 'mcp' && mcpEnabled) ||
-      (mode === 'prs' && prsEnabled)
+      (mode === 'prs' && prsEnabled) ||
+      contributedTabs.some((tab) => tab.id === mode)
     if (modeStillEnabled) return
-    if (todoEnabled) setMode()
-    else openMarkdown()
-  }, [gitEnabled, mcpEnabled, prsEnabled, mode, openMarkdown, setMode, todoEnabled])
+    openMarkdown()
+  }, [contributedTabs, gsdSyncAvailable, mcpEnabled, prsEnabled, mode, openMarkdown])
 
   return (
     <aside className={styles.sidebar} aria-label={t('rightSidebar.navigation')}>
       <div className={styles.sidebarTabs} role="tablist" aria-label={t('rightSidebar.navigation')}>
-        {todoEnabled ? (
-          <button
-            type="button"
-            role="tab"
-            aria-selected={mode === 'todo'}
-            className={`${styles.sidebarTab} ${mode === 'todo' ? styles.sidebarTabActive : ''}`}
-            onClick={setMode}
-            title={t('todo.title')}
-          >
-            <ListTodo size={14} />
-            <span>{t('rightSidebar.todoTab')}</span>
-          </button>
-        ) : null}
         <button
           type="button"
           role="tab"
@@ -124,30 +109,37 @@ export function RightSidebar() {
           <FileText size={14} />
           <span>{t('rightSidebar.markdownTab')}</span>
         </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={mode === 'gsdSync'}
-          className={`${styles.sidebarTab} ${mode === 'gsdSync' ? styles.sidebarTabActive : ''}`}
-          onClick={showGsdSyncSidebar}
-          title={t('rightSidebar.gsdSyncTab')}
-        >
-          <Sparkles size={14} />
-          <span>{t('rightSidebar.gsdSyncTab')}</span>
-        </button>
-        {gitEnabled ? (
+        {gsdSyncAvailable ? (
           <button
             type="button"
             role="tab"
-            aria-selected={mode === 'git'}
-            className={`${styles.sidebarTab} ${mode === 'git' ? styles.sidebarTabActive : ''}`}
-            onClick={showGit}
-            title={t('ui.sidebar.git')}
+            aria-selected={mode === 'gsdSync'}
+            className={`${styles.sidebarTab} ${mode === 'gsdSync' ? styles.sidebarTabActive : ''}`}
+            onClick={showGsdSyncSidebar}
+            title={t('rightSidebar.gsdSyncTab')}
           >
-            <GitBranch size={14} />
-            <span>{t('ui.sidebar.git')}</span>
+            <Sparkles size={14} />
+            <span>{t('rightSidebar.gsdSyncTab')}</span>
           </button>
         ) : null}
+        {contributedTabs.map((tab) => {
+          const TabIcon = tab.icon
+          const label = sidebarTabLabel(t, tab)
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              aria-selected={mode === tab.id}
+              className={`${styles.sidebarTab} ${mode === tab.id ? styles.sidebarTabActive : ''}`}
+              onClick={() => setRightSidebarMode(tab.id)}
+              title={label}
+            >
+              <TabIcon size={14} />
+              <span>{label}</span>
+            </button>
+          )
+        })}
         {mcpEnabled ? (
           <button
             type="button"
@@ -175,17 +167,6 @@ export function RightSidebar() {
           </button>
         ) : null}
         <span className={styles.toolbarSpacer} />
-        {mode === 'todo' && todoEnabled ? (
-          <button
-            type="button"
-            className={styles.toolbarUtility}
-            onClick={() => openModal('todoSettings')}
-            title={t('todo.openSettings')}
-            aria-label={t('todo.openSettings')}
-          >
-            <Settings size={14} />
-          </button>
-        ) : null}
         {mode === 'mcp' && mcpEnabled ? (
           <button
             type="button"
@@ -210,16 +191,23 @@ export function RightSidebar() {
       </div>
       <div className={styles.tabContent}>
         {mode === 'markdown' ? <MarkdownSidebarViewer /> : null}
-        {mode === 'todo' && todoEnabled ? <TodoSidebar /> : null}
-        {mode === 'gsdSync' ? <GsdSyncSidebarContent /> : null}
+        {mode === 'gsdSync' && gsdSyncAvailable ? <GsdSyncSidebarContent /> : null}
         {mode === 'mcp' && mcpEnabled ? <McpPanel /> : null}
         {mode === 'prs' && prsEnabled ? <PullRequestsSidebar /> : null}
-        {mode === 'git' && gitEnabled ? (
-          <GitSidebarContent
-            activeProject={activeProject}
-            sidebarTerminal={sidebarTerminal}
-            sidebarSubTab={sidebarSubTab}
-          />
+        {contributedTab ? (
+          <section className={styles.contributedPanel}>
+            <header className={styles.panelHeader}>
+              <contributedTab.icon size={15} />
+              <span>{sidebarTabPanelLabel(t, contributedTab)}</span>
+            </header>
+            <ContributedView
+              view={contributedTab}
+              projectId={activeProject?.id ?? null}
+              cwd={sidebarSubTab?.cwd || sidebarTerminal?.cwd || null}
+              ptyId={sidebarSubTab?.ptyId ?? null}
+              terminalName={sidebarTerminal?.name ?? null}
+            />
+          </section>
         ) : null}
       </div>
     </aside>
@@ -326,50 +314,6 @@ function GsdSyncRow({ session, onOpen }: { session: GsdSyncSession; onOpen: () =
   )
 }
 
-function GitSidebarContent({
-  activeProject,
-  sidebarTerminal,
-  sidebarSubTab,
-}: {
-  activeProject: Project | undefined
-  sidebarTerminal: Terminal | null
-  sidebarSubTab: SubTab | undefined
-}) {
-  const t = useT()
-  // Prefers the live terminal/sub-tab's cwd when it exists (more precise —
-  // covers worktree/subfolder) — but Source Control should always work
-  // with the SELECTED project, not require an open terminal. Without this
-  // fallback, a project with no open terminal never showed any git status
-  // even while selected.
-  const cwd = sidebarSubTab?.cwd || sidebarTerminal?.cwd || activeProject?.defaultCwd
-  const ptyId = sidebarSubTab && sidebarTerminal ? sidebarSubTab.ptyId : null
-  const terminalName = sidebarTerminal?.name ?? activeProject?.name ?? ''
-  return (
-    <section className={styles.gitPanel}>
-      <header className={styles.panelHeader}>
-        <GitBranch size={15} />
-        <span>{t('ui.sidebar.sourceControl')}</span>
-      </header>
-      {activeProject && cwd ? (
-        <GitControl
-          projectId={activeProject.id}
-          cwd={cwd}
-          ptyId={ptyId}
-          terminalName={terminalName}
-        />
-      ) : (
-        <div className={styles.gitEmpty}>
-          <EmptyState
-            compact
-            icon={<GitBranch size={18} />}
-            title={t('git.empty.noTerminal')}
-            description={t('git.empty.noTerminalDesc')}
-          />
-        </div>
-      )}
-    </section>
-  )
-}
 
 function MarkdownSidebarViewer() {
   const t = useT()

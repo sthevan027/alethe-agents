@@ -1,5 +1,8 @@
 import { create } from 'zustand'
 
+/** The Todo plugin's view. The sidebar falls back when it is not installed. */
+const TODOS_VIEW_ID = 'todos'
+
 import {
   addMarkdownSidebarHistoryEntry,
   readMarkdownSidebarHistory,
@@ -19,6 +22,8 @@ import type { UpdateInfo } from '../lib/updater'
 /** Ephemeral UI state. Persisted state belongs in `projectsStore`. */
 
 type ModalKind =
+  | 'resetCredit'
+  | 'projectGrid'
   | 'newProject'
   | 'newGroup'
   | 'editGroup'
@@ -38,7 +43,6 @@ type ModalKind =
   | 'themePicker'
   | 'profiles'
   | 'sync'
-  | 'todoSettings'
   | 'topbarSettings'
   | 'updateAvailable'
   | 'whatsNew'
@@ -49,10 +53,13 @@ type ModalKind =
   | 'handoff'
   | 'mcpManager'
   | 'mcpIntro'
+  /** Open on purpose: plugins contribute their own modals at runtime. */
+  | (string & {})
   | null
 
 export type ActiveView = 'home' | 'workspace' | 'agentCanvas' | 'agentSandbox'
-export type RightSidebarMode = 'todo' | 'markdown' | 'git' | 'gsdSync' | 'mcp' | 'prs'
+/** Open on purpose: plugins contribute right-sidebar tabs at runtime. */
+export type RightSidebarMode = 'markdown' | 'gsdSync' | 'mcp' | 'prs' | (string & {})
 export type MarkdownSidebarTab = { path: string; title: string }
 
 export type MemorySample = MemoryStats & {
@@ -110,6 +117,8 @@ type UiState = {
   activeView: ActiveView
 
   rightSidebarMode: RightSidebarMode
+  /** Active left-sidebar tab. Shared so both shells and commands address the same one. */
+  leftSidebarTab: string
   rightSidebarMarkdown: { path: string; title: string } | null
   rightSidebarMarkdownTabs: MarkdownSidebarTab[]
 
@@ -153,7 +162,8 @@ type UiState = {
   restoreMarkdownSidebarHistory: () => void
   showMarkdownSidebar: () => void
   showTodoSidebar: () => void
-  showGitSidebar: () => void
+  setRightSidebarMode: (mode: RightSidebarMode) => void
+  setLeftSidebarTab: (tab: string) => void
   showGsdSyncSidebar: () => void
   showMcpSidebar: () => void
   showPrsSidebar: () => void
@@ -195,7 +205,8 @@ export const useUiStore = create<UiState>((set) => ({
   activeTerminal: null,
   selectedPanes: [],
   activeView: 'workspace',
-  rightSidebarMode: 'todo',
+  rightSidebarMode: TODOS_VIEW_ID,
+  leftSidebarTab: 'projects',
   rightSidebarMarkdown: null,
   rightSidebarMarkdownTabs: [],
   agentCanvasSession: null,
@@ -282,7 +293,7 @@ export const useUiStore = create<UiState>((set) => ({
       return {
         rightSidebarMarkdownTabs: tabs,
         rightSidebarMarkdown: next,
-        rightSidebarMode: next ? 'markdown' : 'todo',
+        rightSidebarMode: next ? 'markdown' : TODOS_VIEW_ID,
       }
     }),
   restoreMarkdownSidebarHistory: () =>
@@ -295,8 +306,9 @@ export const useUiStore = create<UiState>((set) => ({
       }
     }),
   showMarkdownSidebar: () => set({ rightSidebarMode: 'markdown' }),
-  showTodoSidebar: () => set({ rightSidebarMode: 'todo' }),
-  showGitSidebar: () => set({ rightSidebarMode: 'git' }),
+  showTodoSidebar: () => set({ rightSidebarMode: TODOS_VIEW_ID }),
+  setRightSidebarMode: (mode) => set({ rightSidebarMode: mode }),
+  setLeftSidebarTab: (tab) => set({ leftSidebarTab: tab }),
   showGsdSyncSidebar: () => set({ rightSidebarMode: 'gsdSync' }),
   showMcpSidebar: () => set({ rightSidebarMode: 'mcp' }),
   showPrsSidebar: () => set({ rightSidebarMode: 'prs' }),

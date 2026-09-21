@@ -5,13 +5,7 @@ import type { StoreApi } from 'zustand'
 
 import { resolveTerminalCwd, touchTerminalUsage } from '../lib/terminalFactory'
 import { cleanupPtys } from '../lib/terminalLifecycle'
-import {
-  DEFAULT_TODOS,
-  normalizeTodoTags,
-  normalizeTodoTitle,
-  reorderTodoItems,
-} from '../lib/todos'
-import type { Project, SubTab, Terminal, TodoItem, WorkspaceContainer } from '../lib/types'
+import type { Project, SubTab, Terminal, WorkspaceContainer } from '../lib/types'
 import type { ProjectsState } from './projectsStore'
 import { clampUiZoom } from './projectsStore.constants'
 
@@ -31,119 +25,6 @@ export type SliceCtx = {
   updateContainer: (projectId: string, fn: (c: WorkspaceContainer) => WorkspaceContainer) => void
 }
 
-type TodosSlice = Pick<
-  ProjectsState,
-  | 'createTodo'
-  | 'createTodoFromPullRequest'
-  | 'renameTodo'
-  | 'updateTodoTags'
-  | 'setTodoProject'
-  | 'resetTodosToDefault'
-  | 'toggleTodo'
-  | 'deleteTodo'
-  | 'reorderTodo'
->
-
-export function createTodosSlice({ update, get }: SliceCtx): TodosSlice {
-  return {
-    createTodo: (rawTitle, rawTags = [], projectId) => {
-      const title = normalizeTodoTitle(rawTitle)
-      if (!title) return null
-      const todo: TodoItem = {
-        id: nanoid(),
-        title,
-        completed: false,
-        tags: normalizeTodoTags(rawTags),
-        ...(projectId ? { projectId } : {}),
-      }
-      update((state) => {
-        const completedIndex = state.todos.findIndex((item) => item.completed)
-        const insertAt = completedIndex === -1 ? state.todos.length : completedIndex
-        return {
-          todos: [...state.todos.slice(0, insertAt), todo, ...state.todos.slice(insertAt)],
-        }
-      })
-      return todo
-    },
-
-    createTodoFromPullRequest: (pr, projectId) => {
-      const existing = get().todos.find(
-        (item) => item.prRepo === pr.repo && item.prNumber === pr.number,
-      )
-      if (existing) return existing
-      const todo: TodoItem = {
-        id: nanoid(),
-        title: normalizeTodoTitle(`PR #${pr.number}: ${pr.title}`),
-        completed: false,
-        tags: ['pr'],
-        ...(projectId ? { projectId } : {}),
-        prUrl: pr.url,
-        prNumber: pr.number,
-        prRepo: pr.repo,
-      }
-      update((state) => {
-        const completedIndex = state.todos.findIndex((item) => item.completed)
-        const insertAt = completedIndex === -1 ? state.todos.length : completedIndex
-        return {
-          todos: [...state.todos.slice(0, insertAt), todo, ...state.todos.slice(insertAt)],
-        }
-      })
-      return todo
-    },
-
-    renameTodo: (id, rawTitle) => {
-      const title = normalizeTodoTitle(rawTitle)
-      if (!title) return
-      update((state) => ({
-        todos: state.todos.map((item) => (item.id === id ? { ...item, title } : item)),
-      }))
-    },
-
-    updateTodoTags: (id, tags) =>
-      update((state) => ({
-        todos: state.todos.map((item) =>
-          item.id === id ? { ...item, tags: normalizeTodoTags(tags) } : item,
-        ),
-      })),
-
-    setTodoProject: (id, projectId) =>
-      update((state) => ({
-        todos: state.todos.map((item) => {
-          if (item.id !== id) return item
-          const next = { ...item }
-          if (projectId) next.projectId = projectId
-          else delete next.projectId
-          return next
-        }),
-      })),
-
-    resetTodosToDefault: () =>
-      update(() => ({
-        todos: DEFAULT_TODOS.map((item) => ({ ...item, id: nanoid() })),
-      })),
-
-    toggleTodo: (id) =>
-      update((state) => {
-        const current = state.todos.find((item) => item.id === id)
-        if (!current) return
-        const changed = { ...current, completed: !current.completed }
-        const remaining = state.todos.filter((item) => item.id !== id)
-        if (changed.completed) return { todos: [...remaining, changed] }
-        const firstCompleted = remaining.findIndex((item) => item.completed)
-        const insertAt = firstCompleted === -1 ? remaining.length : firstCompleted
-        return {
-          todos: [...remaining.slice(0, insertAt), changed, ...remaining.slice(insertAt)],
-        }
-      }),
-
-    deleteTodo: (id) =>
-      update((state) => ({ todos: state.todos.filter((item) => item.id !== id) })),
-
-    reorderTodo: (draggedId, targetId) =>
-      update((state) => ({ todos: reorderTodoItems(state.todos, draggedId, targetId) })),
-  }
-}
-
 type SubTabsSlice = Pick<
   ProjectsState,
   | 'createSubTab'
@@ -153,6 +34,7 @@ type SubTabsSlice = Pick<
   | 'setSubTabCwd'
   | 'setSubTabCompletionUnread'
   | 'setSubTabSessionId'
+  | 'setSubTabName'
   | 'setSubTabInitialInput'
   | 'setSubTabHandoff'
 >
@@ -195,13 +77,13 @@ export function createSubTabsSlice({ updateTerminal, updateSubTab }: SliceCtx): 
         const remaining = t.tabs.filter((s) => s.id !== tabId)
         if (remaining.length === 0) return t
         const adjacentTab =
-          closingIndex >= 0 ? (t.tabs[closingIndex + 1] ?? t.tabs[closingIndex - 1]) : undefined
+          closingIndex >= 0
+            ? (t.tabs[closingIndex + 1] ?? t.tabs[closingIndex - 1])
+            : undefined
         const activeTabId =
           t.activeTabId === tabId
             ? (adjacentTab?.id ?? remaining[0].id)
-            : remaining.some((tab) => tab.id === t.activeTabId)
-              ? t.activeTabId
-              : remaining[0].id
+            : (remaining.some((tab) => tab.id === t.activeTabId) ? t.activeTabId : remaining[0].id)
         const next = { ...t, tabs: remaining, activeTabId }
         return activeTabId ? touchTerminalUsage(next, activeTabId) : next
       }),
@@ -234,6 +116,12 @@ export function createSubTabsSlice({ updateTerminal, updateSubTab }: SliceCtx): 
 
     setSubTabSessionId: (projectId, terminalId, tabId, sessionId) =>
       updateSubTab(projectId, terminalId, tabId, (s) => ({ ...s, sessionId })),
+
+    setSubTabName: (projectId, terminalId, tabId, name) =>
+      updateSubTab(projectId, terminalId, tabId, (s) => ({
+        ...s,
+        name: name.trim() || s.type,
+      })),
 
     setSubTabInitialInput: (projectId, terminalId, tabId, initialInput) =>
       updateSubTab(projectId, terminalId, tabId, (s) => ({ ...s, initialInput })),

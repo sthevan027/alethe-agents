@@ -4,24 +4,18 @@ import { useEffect, useMemo, useState } from 'react'
 import { useUiStore } from '../../stores/uiStore'
 import { useProjectsStore } from '../../stores/projectsStore'
 import { pickDirectory } from '../../lib/dialog'
-import { UNRESTRICTED_FLAG, type AgentRuntimeProfile, type AgentType } from '../../lib/types'
+import {
+  agentLabel,
+  isAgentEnabled,
+  resolveUnrestrictedFlag,
+  useAgentTypes,
+} from '../../lib/agentProviders'
+import { isShellAgentType, type AgentRuntimeProfile, type AgentType } from '../../lib/types'
 import { AgentIcon } from '../icons/AgentIcons'
 import { useT } from '../../lib/i18n'
 import { Modal } from './Modal'
 import controls from './controls.module.css'
 import picker from './agentPicker.module.css'
-
-const AGENTS: { type: AgentType; label: string }[] = [
-  { type: 'shell', label: 'Shell' },
-  { type: 'claude', label: 'Claude' },
-  { type: 'codex', label: 'Codex' },
-  { type: 'copilot', label: 'GitHub Copilot' },
-  { type: 'cursor', label: 'Cursor' },
-  { type: 'antigravity', label: 'Antigravity' },
-  { type: 'opencode', label: 'OpenCode' },
-  { type: 'freebuff', label: 'Freebuff' },
-  { type: 'mimo', label: 'Mimo' },
-]
 
 export function NewSubTabModal() {
   const t = useT()
@@ -45,19 +39,11 @@ export function NewSubTabModal() {
   const [type, setType] = useState<AgentType>('shell')
   const [runtimeProfile, setRuntimeProfile] = useState<AgentRuntimeProfile>('lean')
   const [cwd, setCwd] = useState('')
-  const [unrestricted, setUnrestricted] = useState<Record<AgentType, boolean>>({
-    shell: false,
-    claude: false,
-    codex: false,
-    copilot: false,
-    cursor: false,
-    antigravity: false,
-    opencode: false,
-    freebuff: false,
-    mimo: false,
-  })
+  const [unrestricted, setUnrestricted] = useState<Partial<Record<AgentType, boolean>>>({})
 
-  const visibleAgents = AGENTS.filter((a) => enabled[a.type])
+  const visibleAgents = useAgentTypes()
+    .filter((type) => isAgentEnabled(enabled, type))
+    .map((type) => ({ type, label: agentLabel(type) }))
   const inheritedCwd = useMemo(() => {
     const activeTab =
       terminal?.tabs.find((item) => item.id === terminal.activeTabId) ?? terminal?.tabs[0]
@@ -73,22 +59,12 @@ export function NewSubTabModal() {
     setType('shell')
     setRuntimeProfile('lean')
     setCwd('')
-    setUnrestricted({
-      shell: false,
-      claude: false,
-      codex: false,
-      copilot: false,
-      cursor: false,
-      antigravity: false,
-      opencode: false,
-      freebuff: false,
-      mimo: false,
-    })
+    setUnrestricted({})
   }
 
   const submit = () => {
     if (!context?.projectId || !context?.terminalId) return
-    const flag = UNRESTRICTED_FLAG[type]
+    const flag = resolveUnrestrictedFlag(type)
     const extraArgs = unrestricted[type] && flag ? [flag] : undefined
     createSubTab(context.projectId, context.terminalId, {
       type,
@@ -146,7 +122,7 @@ export function NewSubTabModal() {
                 </span>
                 <span className={picker.rowLabel}>{a.label}</span>
                 <span className={picker.rowEnd}>
-                  {UNRESTRICTED_FLAG[a.type] ? (
+                  {resolveUnrestrictedFlag(a.type) ? (
                     <button
                       type="button"
                       className={`${picker.cwdBtn} ${unrestricted[a.type] ? picker.boltActive : ''}`}
@@ -157,7 +133,9 @@ export function NewSubTabModal() {
                       }}
                       title={
                         unrestricted[a.type]
-                          ? t('term.unrestrictedActive', { flag: UNRESTRICTED_FLAG[a.type] ?? '' })
+                          ? t('term.unrestrictedActive', {
+                              flag: resolveUnrestrictedFlag(a.type) ?? '',
+                            })
                           : t('term.unrestrictedEnable')
                       }
                       aria-label={t('term.unrestricted')}
@@ -190,7 +168,7 @@ export function NewSubTabModal() {
           })}
         </div>
       </div>
-      {type !== 'shell' ? (
+      {!isShellAgentType(type) ? (
         <div className={controls.field}>
           <label className={controls.label}>{t('term.runtimeProfile')}</label>
           <div className={controls.pillRow}>

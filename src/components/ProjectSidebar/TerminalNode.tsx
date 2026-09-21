@@ -46,6 +46,7 @@ export function TerminalNode({
     activeTab && uniqueTypes.length > 1
       ? [activeTab.type, ...uniqueTypes.filter((type) => type !== activeTab.type)]
       : uniqueTypes
+  const hasUnreadCompletion = terminal.tabs.some((tab) => tab.completionUnread)
   const isWorking = useTerminalsStore((state) =>
     terminal.tabs.some((tab) => tab.ptyId && state.byPtyId[tab.ptyId]?.status === 'working'),
   )
@@ -57,7 +58,7 @@ export function TerminalNode({
       {...listeners}
       className={`${styles.terminalRow} ${focused ? styles.terminalFocused : ''} ${
         !selected ? styles.terminalHidden : ''
-      } ${terminal.disabled ? styles.terminalDisabled : ''} ${isDragging ? styles.dragging : ''}`}
+      } ${terminal.disabled ? styles.terminalDisabled : ''} ${isWorking ? styles.terminalWorking : ''} ${isDragging ? styles.dragging : ''}`}
       onClick={() => onClick()}
       onDoubleClick={(event) => {
         event.stopPropagation()
@@ -95,7 +96,9 @@ export function TerminalNode({
       {terminal.tabs.length > 1 ? (
         <span className={styles.tabCount}>{terminal.tabs.length}</span>
       ) : null}
-      <span className={`${styles.rowEndSlot} ${isWorking ? styles.rowEndSlotActive : ''}`}>
+      <span
+        className={`${styles.rowEndSlot} ${isWorking || hasUnreadCompletion ? styles.rowEndSlotActive : ''}`}
+      >
         {isWorking ? (
           <DotmCircular2
             size={13}
@@ -106,6 +109,14 @@ export function TerminalNode({
             ariaLabel={t('ui.terminal.working')}
             className={`${styles.terminalLoading} ${styles.rowStatusIndicator}`}
           />
+        ) : hasUnreadCompletion ? (
+          <span
+            className={`${styles.doneGlyph} ${styles.rowStatusIndicator}`}
+            title={t('ui.terminal.responseReady')}
+            aria-label={t('ui.terminal.responseReady')}
+          >
+            ✓
+          </span>
         ) : null}
         <button
           type="button"

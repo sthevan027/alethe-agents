@@ -13,7 +13,6 @@ import {
 import {
   Folder,
   FolderPlus,
-  GitBranch,
   Grid3x3,
   Home,
   MoreHorizontal,
@@ -26,6 +25,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 
 import { useT } from '../../lib/i18n'
+import { sidebarTabLabel, sidebarTabPanelLabel } from '../../lib/plugins'
+import { useSidebarViews } from '../../lib/viewPlacement'
 import { formatShortcut } from '../../lib/platform'
 import {
   sidebarDragKind,
@@ -35,12 +36,12 @@ import {
 import { type Group, type Project } from '../../lib/types'
 import { useProjectsStore } from '../../stores/projectsStore'
 import { useUiStore } from '../../stores/uiStore'
+import { ContributedView } from '../ContributedView'
 import { EmptyState } from '../EmptyState'
 import { SidebarNowPlaying } from '../SidebarNowPlaying'
 import { UserProfile } from '../UserProfile'
 import { ContextMenu, type MenuItem } from './ContextMenu'
 import { FileExplorer } from './FileExplorer'
-import { GitControl } from './GitControl'
 import { NormalGroupNode as GroupNode } from './NormalGroupNode'
 import { LayoutFooter, WorkspaceLayoutFooter } from './LayoutFooter'
 import { NormalProjectNode as ProjectNode } from './NormalProjectNode'
@@ -110,7 +111,6 @@ export function NormalProjectSidebar() {
   const ungroupedOrder = useProjectsStore((s) => s.ungroupedOrder)
   const containers = useProjectsStore((s) => s.workspace.containers)
   const activeProjectId = useProjectsStore((s) => s.activeProjectId)
-  const showGitControl = useProjectsStore((s) => s.preferences.enabledFeatures.git)
   const preferences = useProjectsStore((s) => s.preferences)
 
   // --- action selectors (stable refs, grouped for readability) ---
@@ -147,10 +147,11 @@ export function NormalProjectSidebar() {
       reorderGroups: s.reorderGroups,
       togglePane: s.togglePane,
       setLaneVisible: s.setLaneVisible,
-      setTerminalRemoteExcluded: s.setTerminalRemoteExcluded,
+      setTerminalRemoteShared: s.setTerminalRemoteShared,
       setSubTabCompletionUnread: s.setSubTabCompletionUnread,
       createFilePane: s.createFilePane,
       createGraphifyPane: s.createGraphifyPane,
+      createOrchestratorPane: s.createOrchestratorPane,
       setFullscreenPane: s.setFullscreenPane,
     })),
   )
@@ -167,12 +168,18 @@ export function NormalProjectSidebar() {
   const [menu, setMenu] = useState<ContextMenuState>(null)
   const [draggingId, setDraggingId] = useState<string | null>(null)
   const [dropIndicator, setDropIndicator] = useState<SidebarDropIndicator | null>(null)
-  const [sidebarTab, setSidebarTab] = useState<'files' | 'git' | 'projects'>('projects')
+  const sidebarTab = useUiStore((s) => s.leftSidebarTab)
+  const setSidebarTab = useUiStore((s) => s.setLeftSidebarTab)
+  const contributedTabs = useSidebarViews('left')
+  const contributedTab = contributedTabs.find((tab) => tab.id === sidebarTab)
   const keepHome = activeView === 'home'
 
+  // A contributed tab can vanish when its plugin is disabled at runtime.
   useEffect(() => {
-    if (!showGitControl && sidebarTab === 'git') setSidebarTab('projects')
-  }, [showGitControl, sidebarTab])
+    if (sidebarTab === 'files' || sidebarTab === 'projects') return
+    if (contributedTabs.some((tab) => tab.id === sidebarTab)) return
+    setSidebarTab('projects')
+  }, [contributedTabs, sidebarTab])
 
                                                                          
   const openPaneSets = useMemo(() => {
@@ -340,6 +347,7 @@ export function NormalProjectSidebar() {
   const { projectMenu, groupMenu, terminalMenu } = createSidebarMenus({
     t,
     graphifyEnabled: preferences.enabledFeatures.graphify,
+    orchestratorEnabled: preferences.enabledFeatures.orchestrator,
     browserEnabled: preferences.enabledFeatures.browser,
     groups: groups.filter((group) => !group.archived),
     openPaneSets,
@@ -515,23 +523,28 @@ export function NormalProjectSidebar() {
           <Folder size={14} />
           <span>{t('ui.sidebar.files')}</span>
         </button>
-        {showGitControl && preferences.gitControlPlacement === 'left' ? (
-          <button
-            type="button"
-            role="tab"
-            aria-selected={sidebarTab === 'git'}
-            aria-label={t('ui.sidebar.git')}
-            title={t('ui.sidebar.git')}
-            className={`${styles.sidebarTab} ${sidebarTab === 'git' ? styles.sidebarTabActive : ''}`}
-            onClick={() => {
-              setSidebarTab('git')
-              if (!keepHome) setActiveView('workspace')
-            }}
-          >
-            <GitBranch size={14} />
-            <span>{t('ui.sidebar.git')}</span>
-          </button>
-        ) : null}
+        {contributedTabs.map((tab) => {
+          const TabIcon = tab.icon
+          const label = sidebarTabLabel(t, tab)
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              aria-selected={sidebarTab === tab.id}
+              aria-label={label}
+              title={label}
+              className={`${styles.sidebarTab} ${sidebarTab === tab.id ? styles.sidebarTabActive : ''}`}
+              onClick={() => {
+                setSidebarTab(tab.id)
+                if (!keepHome) setActiveView('workspace')
+              }}
+            >
+              <TabIcon size={14} />
+              <span>{label}</span>
+            </button>
+          )
+        })}
       </div>
 
       <div className={styles.quickNavList}>
@@ -602,32 +615,18 @@ export function NormalProjectSidebar() {
         </section>
       ) : null}
 
-      {sidebarTab === 'git' ? (
+      {contributedTab ? (
         <section className={styles.explorerPanel}>
           <div className={styles.explorerHeader}>
-            <span className={styles.explorerLabel}>{t('ui.sidebar.sourceControl')}</span>
+            <span className={styles.explorerLabel}>{sidebarTabPanelLabel(t, contributedTab)}</span>
           </div>
-          {sidebarTerminal && sidebarSubTab && activeProject ? (
-            <GitControl
-              projectId={activeProject.id}
-              cwd={sidebarSubTab.cwd || sidebarTerminal.cwd}
-              ptyId={sidebarSubTab.ptyId}
-              terminalName={sidebarTerminal.name}
-            />
-          ) : (
-            <div className={styles.explorerEmpty}>
-              <EmptyState
-                compact
-                icon={<GitBranch size={18} />}
-                title={t('git.empty.noTerminal')}
-                description={t('git.empty.noTerminalDesc')}
-                primaryAction={{
-                  label: t('ui.sidebar.emptyAction'),
-                  onClick: () => openModal('newProject'),
-                }}
-              />
-            </div>
-          )}
+          <ContributedView
+            view={contributedTab}
+            projectId={activeProject?.id ?? null}
+            cwd={sidebarSubTab?.cwd || sidebarTerminal?.cwd || null}
+            ptyId={sidebarSubTab?.ptyId ?? null}
+            terminalName={sidebarTerminal?.name ?? null}
+          />
         </section>
       ) : null}
 

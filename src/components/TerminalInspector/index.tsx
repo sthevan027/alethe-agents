@@ -18,7 +18,8 @@ import { useMemo, useState, type ReactNode } from 'react'
 import { preparePtyRuntimeLaunch } from '../../lib/agentRuntimeAdapter'
 import { buildAgentLaunch } from '../../lib/sessionLaunch'
 import { useT } from '../../lib/i18n'
-import { agentCliCommand, type SubTab, type Terminal } from '../../lib/types'
+import { resolveAgentCliCommand } from '../../lib/agentProviders'
+import type { SubTab, Terminal } from '../../lib/types'
 import {
   getPtyCwd,
   openInBrowser,
@@ -137,7 +138,7 @@ function InspectorBody({ projectId, terminal }: { projectId: string; terminal: T
         id: activeTab.ptyId,
         cols: 80,
         rows: 24,
-        command: agentCliCommand(activeTab.type),
+        command: resolveAgentCliCommand(activeTab.type),
         cwd: activeTab.cwd || undefined,
         extraArgs: launch.args,
         env: preparedRuntime.env,

@@ -14,6 +14,7 @@ import {
   SmartphoneNfc,
   Trash2,
   Upload,
+  Workflow,
 } from 'lucide-react'
 
 import { preparePtyRuntimeLaunch } from '../../lib/agentRuntimeAdapter'
@@ -28,7 +29,8 @@ import {
   restartPty,
   writeTextFile,
 } from '../../lib/tauri'
-import { agentCliCommand, type Group, type Project, type Terminal } from '../../lib/types'
+import { resolveAgentCliCommand } from '../../lib/agentProviders'
+import type { Group, Project, Terminal } from '../../lib/types'
 import { useProjectsStore } from '../../stores/projectsStore'
 import { useTerminalsStore } from '../../stores/terminalsStore'
 import { useUiStore } from '../../stores/uiStore'
@@ -49,6 +51,7 @@ type MenuActions = Pick<
   | 'setProjectDisabled'
   | 'deleteProject'
   | 'createGraphifyPane'
+  | 'createOrchestratorPane'
   | 'openGroupWorkspace'
   | 'renameGroup'
   | 'moveGroupToParent'
@@ -64,7 +67,7 @@ type MenuActions = Pick<
   | 'setTerminalDisabled'
   | 'killTerminal'
   | 'setLaneVisible'
-  | 'setTerminalRemoteExcluded'
+  | 'setTerminalRemoteShared'
   | 'deleteTerminal'
   | 'deleteTerminalWithWorktreeCleanup'
   | 'setPreferences'
@@ -73,6 +76,7 @@ type MenuActions = Pick<
 export type SidebarMenuDeps = {
   t: ReturnType<typeof useT>
   graphifyEnabled: boolean
+  orchestratorEnabled: boolean
   browserEnabled: boolean
   groups: Group[]
   openPaneSets: Record<string, Set<string>>
@@ -95,6 +99,7 @@ export function createSidebarMenus(deps: SidebarMenuDeps) {
   const {
     t,
     graphifyEnabled,
+    orchestratorEnabled,
     browserEnabled,
     groups,
     openPaneSets,
@@ -108,6 +113,10 @@ export function createSidebarMenus(deps: SidebarMenuDeps) {
   } = deps
 
   const projectMenu = (project: Project): MenuItem[] => [
+    ...(project.mode !== 'agentSandbox' ? [{
+      kind: 'item' as const, label: t('projectGrid.create'),
+      onClick: () => openModal('projectGrid', { projectId: project.id, action: 'create' }),
+    }] : []),
     {
       kind: 'item',
       label: t('ui.workspace.openIndividually'),
@@ -203,6 +212,22 @@ export function createSidebarMenus(deps: SidebarMenuDeps) {
             label: t('menu.addBrowser'),
             icon: <Globe2 size={14} />,
             onClick: () => openModal('addBrowser', { projectId: project.id }),
+          },
+        ]
+      : []),
+    ...(orchestratorEnabled
+      ? [
+          {
+            kind: 'item' as const,
+            label: t('menu.addOrchestrator'),
+            icon: <Workflow size={14} />,
+            onClick: () => {
+              actions.createOrchestratorPane(
+                project.id,
+                project.defaultCwd ?? project.terminals[0]?.cwd ?? '',
+              )
+              setActiveView('workspace')
+            },
           },
         ]
       : []),
@@ -450,7 +475,7 @@ export function createSidebarMenus(deps: SidebarMenuDeps) {
         id: activeTab.ptyId,
         cols: 80,
         rows: 24,
-        command: agentCliCommand(activeTab.type),
+        command: resolveAgentCliCommand(activeTab.type),
         cwd: activeTab.cwd || undefined,
         extraArgs: launch.args,
         env: runtime.env,
@@ -472,11 +497,16 @@ export function createSidebarMenus(deps: SidebarMenuDeps) {
   }
 
   const terminalMenu = (projectId: string, term: Terminal): MenuItem[] => {
+    const project = useProjectsStore.getState().projects.find((item) => item.id === projectId)
     const inSplit = openPaneSets[projectId]?.has(term.id) ?? false
     const activeTab = activeTerminalTab(term)
     const isTerminalPane = !term.kind || term.kind === 'terminal'
     const effectiveLaneVisible = term.tabs.length > 1 ? true : term.laneVisible === true
     return [
+      ...(project?.mode !== 'agentSandbox' && (project?.grids?.length ?? 0) > 0 ? [{
+        kind: 'item' as const, label: t('projectGrid.move'),
+        onClick: () => openModal('projectGrid', { projectId, terminalId: term.id, action: 'move' }),
+      }] : []),
       {
         kind: 'item',
         label: t('terminalInspector.reveal'),
@@ -587,12 +617,12 @@ export function createSidebarMenus(deps: SidebarMenuDeps) {
         ? [
             {
               kind: 'item' as const,
-              label: term.remoteExcluded
-                ? t('ui.terminal.shareWithRemote')
-                : t('ui.terminal.hideFromRemote'),
-              icon: term.remoteExcluded ? <Smartphone size={14} /> : <SmartphoneNfc size={14} />,
+              label: term.remoteShared
+                ? t('ui.terminal.hideFromRemote')
+                : t('ui.terminal.shareWithRemote'),
+              icon: term.remoteShared ? <SmartphoneNfc size={14} /> : <Smartphone size={14} />,
               onClick: () =>
-                actions.setTerminalRemoteExcluded(projectId, term.id, !term.remoteExcluded),
+                actions.setTerminalRemoteShared(projectId, term.id, !term.remoteShared),
             },
           ]
         : []),

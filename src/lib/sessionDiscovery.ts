@@ -1,14 +1,16 @@
+import { normalizeCwd } from './platform'
+
 export type SessionSnapshot = {
   id: string
   modified_at_ms: number
 }
 
 const claimedIds = new Map<string, Set<string>>()
-                                                                                                   
+
 const claimOwners = new Map<string, Array<{ key: string; sessionId: string }>>()
 
 function claimKey(agent: string, cwd: string): string {
-  return `${agent}\0${cwd.toLowerCase()}`
+  return `${agent}\0${normalizeCwd(cwd)}`
 }
 
 function trackOwner(ptyId: string | undefined, key: string, sessionId: string): void {
@@ -42,14 +44,13 @@ export function isSessionClaimed(
   const key = claimKey(agent, cwd)
   if (!claimedIds.get(key)?.has(sessionId)) return false
   if (!ownerId) return true
-  return claimOwners.get(ownerId)?.some((claim) => claim.key === key && claim.sessionId === sessionId) !== true
+  return (
+    claimOwners
+      .get(ownerId)
+      ?.some((claim) => claim.key === key && claim.sessionId === sessionId) !== true
+  )
 }
 
-   
-                                                                            
-                                                                            
-                                                                          
-   
 export function claimDiscoveredSession(
   agent: string,
   cwd: string,
@@ -71,14 +72,6 @@ export function claimDiscoveredSession(
   return candidate
 }
 
-   
-                                                                          
-                                                                            
-                                                                       
-                                                                            
-                                                                            
-                                      
-   
 export function claimMostRecentSession(
   agent: string,
   cwd: string,
@@ -97,17 +90,19 @@ export function claimMostRecentSession(
   return candidate
 }
 
-   
-                                                                        
-                                                                                
-                                                                                
-                                                                         
-   
 export function releaseSessionClaim(ptyId: string): void {
   const owned = claimOwners.get(ptyId)
   if (!owned) return
   claimOwners.delete(ptyId)
   for (const { key, sessionId } of owned) {
+    // A tab and its live PTY can both own the same claim. Releasing either must
+    // not make the conversation available while the other owner still holds it.
+    if (
+      [...claimOwners.values()].some((claims) =>
+        claims.some((claim) => claim.key === key && claim.sessionId === sessionId),
+      )
+    )
+      continue
     const set = claimedIds.get(key)
     if (!set) continue
     set.delete(sessionId)

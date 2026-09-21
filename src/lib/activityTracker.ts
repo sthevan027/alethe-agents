@@ -9,7 +9,7 @@ import {
   type ActivitySample,
   type OpenCodeBridgeStatus,
 } from './tauri'
-import type { AgentType } from './types'
+import { isShellAgentType, type AgentType } from './types'
 import { useProjectsStore } from '../stores/projectsStore'
 import { useTerminalsStore } from '../stores/terminalsStore'
 import { useUiStore } from '../stores/uiStore'
@@ -69,7 +69,7 @@ function agentMetadata(): Map<string, AgentMeta> {
   for (const project of useProjectsStore.getState().projects) {
     for (const terminal of project.terminals) {
       for (const tab of terminal.tabs) {
-        if (!tab.ptyId || tab.type === 'shell') continue
+        if (!tab.ptyId || isShellAgentType(tab.type)) continue
         result.set(tab.ptyId, {
           agent: tab.type,
           projectId: project.id,

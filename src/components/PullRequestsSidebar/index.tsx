@@ -3,13 +3,13 @@ import { useEffect, useState } from 'react'
 
 import { useT } from '../../lib/i18n'
 import { githubPrListMine, type MyPullRequestSummary } from '../../lib/tauri'
-import { useProjectsStore } from '../../stores/projectsStore'
+import { useTodosStore } from '../../plugins/todos/store'
 import styles from './PullRequestsSidebar.module.css'
 
 export function PullRequestsSidebar() {
   const t = useT()
-  const todos = useProjectsStore((state) => state.todos)
-  const createTodoFromPullRequest = useProjectsStore((state) => state.createTodoFromPullRequest)
+  const todos = useTodosStore((state) => state.todos)
+  const createTodoFromPullRequest = useTodosStore((state) => state.createTodoFromPullRequest)
   const [prs, setPrs] = useState<MyPullRequestSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)

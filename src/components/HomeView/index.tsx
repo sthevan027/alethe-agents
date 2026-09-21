@@ -25,7 +25,8 @@ import { getFirstName, getProfileImageUrl, getProfileInitial } from '../../lib/p
 import { openInBrowser } from '../../lib/tauri'
 import { getProjectDefaultCwd, useProjectsStore } from '../../stores/projectsStore'
 import { useUiStore } from '../../stores/uiStore'
-import { UNRESTRICTED_FLAG, type AgentType, type Project } from '../../lib/types'
+import { resolveUnrestrictedFlag } from '../../lib/agentProviders'
+import type { AgentType, BuiltinAgentType, Project } from '../../lib/types'
 import { AgentIcon } from '../icons/AgentIcons'
 import { AsciiEffect } from '../ui/ascii-effect'
 import { Avatar } from '../ui/Avatar'
@@ -33,6 +34,7 @@ import { EmptyState } from '../EmptyState'
 import homeBackground from '../../assets/home-bg-right.png'
 import { computeStreak } from './ActivityGraph'
 import { NowPlayingWidget } from './NowPlayingWidget'
+import { SetupWalkthrough } from './SetupWalkthrough'
 import { UsageStrip } from './UsageStrip'
 import { ActivityGraph } from './ActivityGraph'
 import { TimeAnalytics } from './TimeAnalytics'
@@ -60,16 +62,22 @@ function compactWorkspacePath(path: string): string {
   return `${homeCollapsed.startsWith('~') ? `~${separator}` : ''}…${separator}${parts.slice(-3).join(separator)}`
 }
 
-const NOTIF_AGENT_CLASS: Record<AgentType, string> = {
+const NOTIF_AGENT_CLASS: Record<BuiltinAgentType, string> = {
   claude: styles.notifClaude,
   codex: styles.notifCodex,
   copilot: styles.notifCodex,
   cursor: styles.notifCursor,
   antigravity: styles.notifAntigravity,
   shell: styles.notifShell,
+  wsl: styles.notifShell,
   opencode: styles.notifOpencode,
   freebuff: styles.notifFreebuff,
   mimo: styles.notifMimo,
+  kiro: styles.notifKiro,
+}
+
+function notifAgentClass(agent: AgentType): string {
+  return NOTIF_AGENT_CLASS[agent as BuiltinAgentType] ?? styles.notifShell
 }
 
 export function HomeView() {
@@ -93,7 +101,7 @@ export function HomeView() {
       openContainerWithAllPanes: s.openContainerWithAllPanes,
       setActiveProjectOnly: s.setActiveProjectOnly,
       createAgentTerminal: s.createAgentTerminal,
-    }))
+    })),
   )
 
   const {
@@ -111,10 +119,9 @@ export function HomeView() {
       requestPaneFocus: s.requestPaneFocus,
       notifications: s.notifications,
       clearNotifications: s.clearNotifications,
-    }))
+    })),
   )
 
-                                                                                   
   const lastUsedByProject = useMemo(() => {
     const map = new Map<string, number>()
     for (const c of containers) {
@@ -190,8 +197,7 @@ export function HomeView() {
   const [quickUnrestricted, setQuickUnrestricted] = useState(false)
   const quickPromptRef = useRef<HTMLInputElement>(null)
   const [quickCwd, setQuickCwd] = useState('')
-                                                                                
-                                                                           
+
   const quickAgent = quickAgents.some((agent) => agent.type === quickAgentRaw)
     ? quickAgentRaw
     : (quickAgents[0]?.type ?? 'claude')
@@ -216,7 +222,7 @@ export function HomeView() {
     const prompt = quickPromptRef.current?.value.trim() ?? ''
     if (!quickTarget || !prompt) return
     const cwd = quickCwd.trim() || getProjectDefaultCwd(quickTarget, projects)
-    const flag = quickUnrestricted ? UNRESTRICTED_FLAG[quickAgent] : null
+    const flag = quickUnrestricted ? resolveUnrestrictedFlag(quickAgent) : null
     const label = QUICK_AGENTS.find((agent) => agent.type === quickAgent)?.label ?? quickAgent
     const terminal = await createAgentTerminal(quickTarget.id, {
       name: label,
@@ -444,6 +450,8 @@ export function HomeView() {
         </div>
       </section>
 
+      <SetupWalkthrough />
+
       <div className={styles.overviewGrid}>
         <section className={styles.section}>
           <div className={styles.sectionHeader}>
@@ -548,7 +556,7 @@ export function HomeView() {
                 <li key={n.id} className={styles.notifItem}>
                   <span
                     className={`${styles.notifIcon} ${
-                      n.agent ? NOTIF_AGENT_CLASS[n.agent] : styles.notifNeutral
+                      n.agent ? notifAgentClass(n.agent) : styles.notifNeutral
                     }`}
                   >
                     {n.agent ? (

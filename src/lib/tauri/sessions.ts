@@ -28,11 +28,10 @@ export type ModelCost = {
   cache_read: number
   cache_write_5m: number
   cache_write_1h: number
-                                                                          
+
   cost_usd: number | null
 }
 
-                                                                  
 export type SessionCost = {
   session_id: string
   agent: string
@@ -55,9 +54,8 @@ export async function getSessionCost(
   return invoke<SessionCost>('get_session_cost', { agent, cwd, sessionId })
 }
 
-                                                                                  
-export async function getTranscriptCost(path: string): Promise<SessionCost> {
-  return invoke<SessionCost>('get_transcript_cost', { path })
+export async function getTranscriptCost(path: string, agent?: string): Promise<SessionCost> {
+  return invoke<SessionCost>('get_transcript_cost', { path, agent })
 }
 
 export type ClaudeSessionMeta = {
@@ -88,6 +86,10 @@ export async function snapshotClaudeSessions(cwd: string): Promise<ClaudeSession
 
 export async function snapshotCodexSessions(cwd: string): Promise<CodexSessionSnapshot[]> {
   return invoke<CodexSessionSnapshot[]>('snapshot_codex_sessions', { cwd })
+}
+
+export async function getCodexSessionTitle(sessionId: string): Promise<string | null> {
+  return invoke<string | null>('get_codex_session_title', { sessionId })
 }
 
 export async function listClaudeSessions(cwd: string): Promise<ClaudeSessionMeta[]> {
