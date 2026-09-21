@@ -1149,6 +1149,26 @@ pub async fn suspend_pty(
         .map_err(|error| format!("suspend_pty: falha na task bloqueante: {error}"))?
 }
 
+/// Reads a PTY's real OS-level cwd from its PID via `sysinfo`, independent of anything the
+/// renderer claims about its own working directory. Used both by `get_pty_cwd` and, for
+/// authorization purposes, by commands elsewhere that need a backend-verified root directory for
+/// a given terminal (see `filesystem::resolve_pty_root`).
+pub fn pty_cwd_sync(sessions: &PtySessions, id: &str) -> Option<PathBuf> {
+    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+    let guard = sessions.lock().ok()?;
+    let session = guard.get(id)?;
+    let pid_u32 = session.child.lock().ok()?.process_id()?;
+    drop(guard);
+
+    let mut sys = System::new();
+    let pid = Pid::from_u32(pid_u32);
+    sys.refresh_processes_specifics(
+        ProcessesToUpdate::Some(&[pid]),
+        ProcessRefreshKind::new().with_cwd(sysinfo::UpdateKind::Always),
+    );
+    Some(sys.process(pid)?.cwd()?.to_path_buf())
+}
+
 #[tauri::command]
 pub async fn get_pty_cwd(
     sessions: State<'_, PtySessions>,
@@ -1156,20 +1176,7 @@ pub async fn get_pty_cwd(
 ) -> Result<Option<String>, String> {
     let sessions: PtySessions = Arc::clone(sessions.inner());
     let result = tokio::task::spawn_blocking(move || {
-        use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
-        let sessions = sessions.lock().ok()?;
-        let session = sessions.get(&id)?;
-        let pid_u32 = session.child.lock().ok()?.process_id()?;
-        drop(sessions);
-
-        let mut sys = System::new();
-        let pid = Pid::from_u32(pid_u32);
-        sys.refresh_processes_specifics(
-            ProcessesToUpdate::Some(&[pid]),
-            ProcessRefreshKind::new().with_cwd(sysinfo::UpdateKind::Always),
-        );
-        let cwd = sys.process(pid)?.cwd()?.to_string_lossy().to_string();
-        Some(cwd)
+        pty_cwd_sync(&sessions, &id).map(|path| path.to_string_lossy().into_owned())
     })
     .await
     .unwrap_or(None);

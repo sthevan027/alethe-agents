@@ -47,6 +47,7 @@ mod opencode_gsd_plugin;
 mod opencode_sessions;
 pub mod orchestrator;
 pub mod orchestrator_core;
+mod path_guard;
 mod paths;
 mod planning;
 mod planning_gate;

@@ -1488,6 +1488,7 @@ export const en = {
     'Permanently delete “{name}” and everything inside it? This cannot be undone.',
   'files.deleteDone': 'Deleted',
   'files.actionFailed': 'File operation failed',
+  'files.noActiveTerminal': 'No active terminal to scope this action to.',
   'files.dragHint':
     '{path} — drag to the workspace, click to preview, or double-click to add to the grid',
   'files.dropToGrid': 'Drop to add this file to the grid',
